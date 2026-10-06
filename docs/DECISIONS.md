@@ -17,3 +17,11 @@ This document captures the default choices made during Phase 0 and later phases 
 
 - Any later decision that materially changes the architecture or the permitted model set must be documented here.
 - The retriever remains the only controlled variable across legal retrieval experiments; all other pipeline components remain frozen.
+
+## Phase 1 decisions
+
+1. Corpus loaders accept JSON, JSONL, and CSV through shared normalized record adapters. AILA queries and relevance judgments are optional inputs and kept separate from corpus documents.
+2. Loader field aliases cover common exports without claiming a canonical upstream schema; source-specific transformations should be recorded and versioned when added.
+3. Cleaning normalizes Unicode and whitespace, removes page-number-only lines and repeated short headers, and preserves legal numbering and citation content.
+4. Chunk sizes are measured in whitespace-delimited tokens for deterministic, dependency-light offsets; chunks retain parent document IDs and character offsets.
+5. Raw datasets, processed corpus text, and generated indices remain excluded from version control due to licensing and privacy requirements.

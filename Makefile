@@ -1,4 +1,4 @@
-.PHONY: setup install lint test format docker-up docker-down experiment
+.PHONY: setup install lint test format docker-up docker-down experiment ingest
 
 PYTHON ?= python
 PIP ?= $(PYTHON) -m pip
@@ -29,3 +29,6 @@ docker-down:
 
 experiment:
 	@echo "NyayaAI experiment pipeline is scaffolded. The full retrieval and evaluation workflow will be implemented in later phases."
+
+ingest:
+	$(PYTHON) -m backend.app.services.ingestion.cli --config configs/data.yaml

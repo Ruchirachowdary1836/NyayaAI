@@ -1,14 +1,17 @@
 corpus:
   source: aila
+  input_path: data/raw/aila
+  queries_path:
+  qrels_path:
   chunk_size: 512
   overlap: 0.15
-  min_chunk_tokens: 128
   deduplicate_near_duplicates: true
 
 paths:
   raw_dir: data/raw
   processed_dir: data/processed
   index_dir: data/indices
+  statistics_path: data/processed/corpus_statistics.json
 
 logging:
   level: INFO
