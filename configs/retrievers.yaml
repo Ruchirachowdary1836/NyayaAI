@@ -1,0 +1,19 @@
+retrievers:
+  bm25:
+    enabled: true
+    k1: 1.5
+    b: 0.75
+    top_k: 10
+  dense:
+    enabled: true
+    model: BAAI/bge-m3
+    embedding_dim: 1024
+    faiss_index: faiss
+    top_k: 10
+  hybrid:
+    enabled: true
+    method: rrf
+    k: 60
+    alpha: 0.7
+    top_k: 10
+    alpha_grid: [0.0, 0.25, 0.5, 0.75, 1.0]

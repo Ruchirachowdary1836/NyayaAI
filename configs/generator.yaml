@@ -1,0 +1,8 @@
+generator:
+  model: llama3.1:8b-instruct
+  temperature: 0.0
+  seed: 42
+  max_new_tokens: 512
+  prompt_version: v1
+  use_only_retrieved_passages: true
+  disclaimer: "This answer is for informational purposes only and is not legal advice."

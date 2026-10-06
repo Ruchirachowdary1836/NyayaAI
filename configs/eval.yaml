@@ -1,0 +1,19 @@
+evaluation:
+  metrics:
+    - precision@5
+    - precision@10
+    - recall@5
+    - recall@10
+    - map
+    - mrr
+    - ndcg
+  significance:
+    method: [paired_t_test, wilcoxon]
+    alpha: 0.05
+  bootstrap:
+    samples: 1000
+    confidence_interval: 0.95
+  query_types:
+    - statute_lookup
+    - conceptual
+    - fact_pattern
