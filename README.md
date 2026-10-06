@@ -1,67 +1,84 @@
 # NyayaAI
 
-NyayaAI is a research-grade legal retrieval and question-answering system for Indian case law and statutes. The project compares BM25, dense retrieval, and hybrid retrieval in a controlled evaluation harness, then serves the best candidate through a retrieval-augmented generation pipeline with explicit source attribution.
+NyayaAI is an evidence-first research system for retrieval and question answering over Indian legal documents. It compares lexical BM25, sentence-embedding dense retrieval, and hybrid fusion; generated answers cite the retrieved passages and show their provenance.
 
-## Phase 0 status
+**Research use only.** NyayaAI is assistive and is not a substitute for professional legal advice. The repository does not include licensed case-law datasets or model weights.
 
-Phase 0 established the repository scaffold, tooling, Docker orchestration, CI, configuration, and decision records. Phase 1 adds license-conscious loaders, document cleaning, paragraph-aware chunking, corpus statistics, and an ingestion CLI. Retrieval, evaluation, RAG, and the complete UI continue in later phases.
+## Start the local stack
 
-## Quick start
+Requirements: Docker Desktop with Compose, and a machine with enough disk space for the backend ML dependencies and any local language/embedding models you choose.
 
-```bash
-make setup
-make docker-up
+```powershell
+Copy-Item .env.example .env
 ```
 
-Then visit:
+Before starting, set a unique `JWT_SECRET_KEY`, `INITIAL_ADMIN_USERNAME`, and `INITIAL_ADMIN_PASSWORD` in `.env`. The bootstrap administrator is created only on first startup if that username does not already exist.
 
-- Frontend: http://localhost:5173
-- Backend API docs: http://localhost:8000/docs
-- MLflow UI: http://localhost:5000
-
-## Ingesting a corpus
-
-Place licensed or otherwise authorized source files under `data/raw/` (the directory is gitignored). Supported inputs are JSON, JSONL, and CSV. Set the `corpus` source and paths in `configs/data.yaml`, then run:
-
-```bash
-python -m backend.app.services.ingestion.cli --config configs/data.yaml
+```powershell
+docker compose up --build
 ```
 
-AILA expects a corpus file or directory containing supported files and optionally a queries file and qrels file. ILDC expects judgment records. `legal_qa` expects question/answer records and writes normalized QA examples without indexing answers as case documents. The adapters accept documented common field aliases; source-specific exports can be converted to these formats without changing the ingestion pipeline. Raw and derived corpus contents remain gitignored. Check dataset terms before downloading, processing, or redistributing any source.
+Open [the web app](http://localhost:5173), [the API reference](http://localhost:8000/docs), or [MLflow](http://localhost:5000). To enable local answer generation, download the configured model after the services start:
 
-## Repository structure
-
-```text
-nyayaai/
-  README.md
-  docker-compose.yml
-  Makefile
-  pyproject.toml
-  docs/
-  configs/
-  data/
-  backend/
-  evaluation/
-  frontend/
-  .github/
+```powershell
+docker compose exec ollama ollama pull llama3.1:8b
 ```
 
-## Core principles
+BM25 search works without an LLM. Dense or hybrid search loads the configured sentence-transformer model on its first use and may require a substantial model download. QA reports an explicit error if Ollama or its model is not available; it does not switch to an ungrounded fallback.
 
-- Only the retriever changes across experiments.
-- Every answer must cite evidence from retrieved passages.
-- Generated answers are assistive and must include a legal-use disclaimer.
-- All experiments are reproducible with fixed seeds and pinned dependencies.
+The application starts with an empty index. Search and comparison return honest empty states until you add a legally authorized corpus.
 
-## Roadmap
+## Ingest authorized data
 
-- Phase 0: scaffold repo, tooling, Docker, CI, config system, decisions log.
-- Phase 1: ingestion and chunking.
-- Phase 2: BM25 baseline.
-- Phase 3: dense retrieval.
-- Phase 4: hybrid retrieval and ablations.
-- Phase 5: legal QA with citation-backed generation.
-- Phase 6: evaluation and statistics.
-- Phase 7: API service and security.
-- Phase 8: UI and end-to-end tests.
-- Phase 9: polish, documentation, and paper skeleton.
+Raw sources, normalized documents, chunks, model files, and local database files are excluded from git. Place permitted JSON, JSONL, or CSV inputs under `data/raw/` and configure `configs/data.yaml`. Supported source modes are `aila`, `ildc`, and `legal_qa`; see [`data/README.md`](data/README.md) for the normalized input fields.
+
+With Python 3.11 installed:
+
+```powershell
+py -3.11 -m pip install -e .
+py -3.11 -m backend.app.services.ingestion.cli --config configs/data.yaml
+```
+
+Ingestion cleans text, removes near-duplicate judgments, chunks on token and paragraph boundaries, preserves parent IDs and character offsets, and writes local JSONL plus corpus statistics. Check upstream license and attribution terms before download, processing, or redistribution. The pipeline does not fetch datasets automatically.
+
+## Run the retrieval experiment
+
+Configure query and qrels inputs in `configs/data.yaml` and `configs/experiment.yaml`, then run:
+
+```powershell
+py -3.11 -m evaluation.run_experiment --config configs/experiment.yaml
+```
+
+The experiment compares BM25, dense, and RRF/weighted hybrid retrieval on the same queries, writes per-query and summary metrics, and computes paired significance tests and bootstrap confidence intervals. Results are read by the experiments dashboard. No benchmark data or scores are fabricated or shipped.
+
+## Develop and test
+
+```powershell
+py -3.11 -m pytest -q
+py -3.11 -m ruff check backend/app backend/tests evaluation
+py -3.11 -m ruff format --check backend/app backend/tests evaluation
+npm --prefix frontend ci
+npm --prefix frontend run build
+npm --prefix frontend test
+```
+
+The Vite development server is included in Compose; for local-only frontend work, run `npm --prefix frontend run dev`. Backend Python dependencies are pinned in `pyproject.toml`, and the frontend lockfile is `frontend/package-lock.json`.
+
+## Product areas
+
+- **Research workspace:** lexical/dense/hybrid retrieval, highlighted matches, source score details, evidence panel, grounded QA, streamed answers, citation audits, and feedback.
+- **Engine comparison:** side-by-side rankings and document-set overlap for the same query.
+- **Source library:** searchable index metadata, full document view, and exact chunk offsets.
+- **Experiments:** MAP/MRR/nDCG and precision charts from recorded runs, with significance and reproducibility metadata.
+- **Administration:** health checks, JWT user/admin roles, corpus readiness, and access-controlled user listing.
+- **Future extensions:** explicitly non-functional roadmap cards outside the core research scope.
+
+## Architecture and decisions
+
+- React 18, TypeScript, Vite, Tailwind, React Router, TanStack Query, Framer Motion, and Recharts frontend.
+- FastAPI/Pydantic backend; retrieval code is framework-independent and generators use a local Ollama endpoint.
+- Data/config inputs and retrieval fusion settings are tracked in `configs/`; local legal text and database files stay out of git.
+- Auth and feedback use PostgreSQL in Compose and SQLite in direct local development. The in-process rate limiter is intended for single-instance local research only.
+- Full experiment protocol and API contract: [`docs/EVALUATION.md`](docs/EVALUATION.md), [`docs/API.md`](docs/API.md), and [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
+
+See [`docs/DECISIONS.md`](docs/DECISIONS.md) for recorded design choices and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the service layout.

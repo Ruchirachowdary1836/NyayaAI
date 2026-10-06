@@ -15,7 +15,8 @@ NyayaAI follows a layered architecture designed around reproducible legal retrie
 5. Explainability layer
    - Citation auditing, confidence estimation, and provenance are surfaced in the API and UI.
 6. Data layer
-   - PostgreSQL stores metadata; vector indices and processed corpora live in data directories and feature stores.
+   - PostgreSQL (Compose) or local SQLite stores user and feedback records; normalized corpus text and chunk indices live in gitignored data directories.
+   - MLflow tracks configured offline retrieval experiments.
 
 ## Design goals
 
@@ -23,3 +24,5 @@ NyayaAI follows a layered architecture designed around reproducible legal retrie
 - Explainable outputs with exact passage provenance.
 - Reproducible metrics and exportable evaluation artifacts.
 - Assistive legal guidance rather than definitive legal advice.
+- Authentication uses signed user/admin JWTs, salted PBKDF2 password hashes, and an environment-bootstrapped administrator.
+- The current request limiter is process-local and intended for single-instance local research, not horizontally scaled production deployment.

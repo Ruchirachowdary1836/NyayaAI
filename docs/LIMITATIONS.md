@@ -7,3 +7,6 @@ The project is designed to be transparent about model and data limitations.
 - Retrieval quality depends on chunking choices and index versioning.
 - Generated answers are assistive only and must not substitute for legal counsel.
 - Licensing restrictions may limit the public release of raw legal corpora.
+- Dense retrieval and QA require locally provisioned model dependencies; model download, runtime, and hardware are not hidden behind mock fallbacks.
+- Direct local development uses SQLite; Compose uses PostgreSQL for users and feedback. Rate limits are per process, so multi-instance deployment requires a shared limiter.
+- The shipped frontend is a research interface, not a legal workflow management system; role-based access protects the local administration endpoints.

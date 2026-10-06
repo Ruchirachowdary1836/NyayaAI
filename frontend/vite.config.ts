@@ -1,5 +1,5 @@
-import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
@@ -9,5 +9,17 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'chart-vendor': ['recharts'],
+          'motion-vendor': ['framer-motion'],
+          'query-vendor': ['@tanstack/react-query'],
+        },
+      },
+    },
   },
 });

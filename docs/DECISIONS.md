@@ -25,3 +25,12 @@ This document captures the default choices made during Phase 0 and later phases 
 3. Cleaning normalizes Unicode and whitespace, removes page-number-only lines and repeated short headers, and preserves legal numbering and citation content.
 4. Chunk sizes are measured in whitespace-delimited tokens for deterministic, dependency-light offsets; chunks retain parent document IDs and character offsets.
 5. Raw datasets, processed corpus text, and generated indices remain excluded from version control due to licensing and privacy requirements.
+
+## Full-stack decisions
+
+1. BM25 uses rank-bm25 Okapi scoring and preserves matching chunks when small-corpus IDF scores are zero.
+2. Dense retrieval normalizes embeddings, prefers an exact FAISS inner-product index, and falls back to exact NumPy cosine search when FAISS is unavailable.
+3. Hybrid retrieval uses deterministic RRF or weighted score fusion; evaluation conditions keep retriever configuration fixed.
+4. Docker Compose uses PostgreSQL for auth and feedback; direct local development and tests default to file-backed SQLite.
+5. Authentication uses salted PBKDF2-HMAC-SHA256 password hashes, signed role-bearing JWTs, user-only self-registration, and an administrator provisioned by environment variables.
+6. The UI shares a typed API client and presents an explicit empty-index state rather than seeding synthetic or unlicensed case law.

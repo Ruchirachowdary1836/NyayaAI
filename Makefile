@@ -28,7 +28,7 @@ docker-down:
 	docker compose down -v
 
 experiment:
-	@echo "NyayaAI experiment pipeline is scaffolded. The full retrieval and evaluation workflow will be implemented in later phases."
+	$(PYTHON) -m evaluation.run_experiment --config configs/experiment.yaml
 
 ingest:
 	$(PYTHON) -m backend.app.services.ingestion.cli --config configs/data.yaml

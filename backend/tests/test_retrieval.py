@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+from backend.app.services.ingestion.chunker import LegalChunk
+from backend.app.services.retrieval.base import Hit, legal_tokenize
+from backend.app.services.retrieval.bm25 import BM25Retriever
+from backend.app.services.retrieval.dense import DenseRetriever
+from backend.app.services.retrieval.hybrid import HybridRetriever
+from backend.app.services.retrieval.registry import RetrieverRegistry
+
+
+def chunk(doc_id: str, text: str) -> LegalChunk:
+    return LegalChunk(doc_id, f"{doc_id}:0", text, 0, len(text), len(text.split()))
+
+
+class StubRetriever:
+    def __init__(self, name: str, hits: list[Hit]) -> None:
+        self.name = name
+        self.hits = hits
+
+    def search(self, query: str, k: int = 10) -> list[Hit]:
+        return self.hits[:k]
+
+
+def hit(doc_id: str, rank: int, score: float, source: str) -> Hit:
+    return Hit(
+        doc_id=doc_id,
+        chunk_id=f"{doc_id}:0",
+        text=doc_id,
+        score=score,
+        rank=rank,
+        source_scores={source: score},
+    )
+
+
+def test_legal_tokenizer_preserves_statute_and_section_numbers() -> None:
+    assert legal_tokenize("Section 482 CrPC, Article 21 and IPC 302") == [
+        "section 482",
+        "crpc",
+        "article 21",
+        "and",
+        "ipc 302",
+    ]
+
+
+def test_bm25_retrieves_matching_legal_provision_and_validates_k() -> None:
+    retriever = BM25Retriever(
+        [
+            chunk("quashing", "Section 482 CrPC permits High Court inherent powers."),
+            chunk("privacy", "Article 21 protects life and personal liberty."),
+        ]
+    )
+
+    results = retriever.search("Section 482 CrPC", k=1)
+
+    assert results[0].doc_id == "quashing"
+    assert results[0].rank == 1
+    assert results[0].source_scores["bm25"] == results[0].score
+    with pytest.raises(ValueError, match="k"):
+        retriever.search("Section 482", k=0)
+
+
+def test_dense_retrieval_with_injected_encoder() -> None:
+    vectors = {
+        "privacy": np.array([1.0, 0.0], dtype=np.float32),
+        "contract": np.array([0.0, 1.0], dtype=np.float32),
+        "privacy query": np.array([0.9, 0.1], dtype=np.float32),
+    }
+    retriever = DenseRetriever(
+        [chunk("privacy", "privacy"), chunk("contract", "contract")],
+        encoder=lambda texts: np.array([vectors[text] for text in texts]),
+    )
+
+    results = retriever.search("privacy query")
+
+    assert [result.doc_id for result in results] == ["privacy", "contract"]
+    assert results[0].source_scores["dense"] == pytest.approx(0.9939, rel=1e-3)
+
+
+def test_rrf_fusion_matches_hand_calculated_example() -> None:
+    sparse = StubRetriever(
+        "bm25",
+        [hit("a", 1, 4.0, "bm25"), hit("b", 2, 3.0, "bm25")],
+    )
+    dense = StubRetriever(
+        "dense",
+        [hit("b", 1, 0.9, "dense"), hit("a", 2, 0.8, "dense")],
+    )
+
+    results = HybridRetriever(sparse, dense, method="rrf", rrf_k=60).search("query")
+
+    assert results[0].doc_id == "a"
+    assert results[0].score == pytest.approx(1 / 61 + 1 / 62)
+    assert results[1].score == pytest.approx(1 / 62 + 1 / 61)
+    assert results[0].source_scores["bm25_rank"] == 1
+    assert results[0].source_scores["dense_rank"] == 2
+
+
+def test_weighted_hybrid_fusion_respects_alpha() -> None:
+    sparse = StubRetriever(
+        "bm25",
+        [hit("lexical", 1, 10.0, "bm25"), hit("semantic", 2, 0.0, "bm25")],
+    )
+    dense = StubRetriever(
+        "dense",
+        [hit("semantic", 1, 1.0, "dense"), hit("lexical", 2, 0.0, "dense")],
+    )
+
+    results = HybridRetriever(sparse, dense, method="weighted", alpha=0.75).search("query")
+
+    assert [result.doc_id for result in results] == ["semantic", "lexical"]
+    assert results[0].score == pytest.approx(0.75)
+    assert results[1].score == pytest.approx(0.25)
+
+
+def test_registry_loads_bm25_without_eagerly_loading_dense_model() -> None:
+    registry = RetrieverRegistry([])
+
+    assert registry.get("bm25").search("no corpus") == []
+    assert registry.document_count == 0
+    assert registry.available == ["bm25", "dense", "hybrid"]

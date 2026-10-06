@@ -1,5 +1,5 @@
 generator:
-  model: llama3.1:8b-instruct
+  model: llama3.1:8b
   temperature: 0.0
   seed: 42
   max_new_tokens: 512

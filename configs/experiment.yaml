@@ -1,0 +1,22 @@
+seed: 42
+bootstrap_samples: 1000
+
+dataset:
+  corpus_path: data/processed/chunks.jsonl
+  queries_path: data/processed/queries.jsonl
+  qrels_path: data/processed/qrels.jsonl
+
+retrieval:
+  embedding_model: BAAI/bge-m3
+  fusion_method: rrf
+  alpha: 0.7
+  rrf_k: 60
+  top_k: 10
+  cutoffs: [5, 10]
+
+output:
+  results_dir: evaluation/results
+
+tracking:
+  tracking_uri: file:./mlruns
+  experiment_name: NyayaAI retrieval
