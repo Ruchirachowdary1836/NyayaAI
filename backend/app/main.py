@@ -28,6 +28,11 @@ logger = logging.getLogger("nyayaai.api")
 
 def _initialize_runtime(application: FastAPI) -> None:
     chunks = load_chunks(settings.data_chunks_path)
+    if settings.app_env.casefold() == "production":
+        if not chunks:
+            raise RuntimeError("Production startup requires a non-empty processed chunk index.")
+        if not Path(settings.data_documents_path).is_file():
+            raise RuntimeError("Production startup requires the processed source documents file.")
     retrievers = RetrieverRegistry(
         chunks,
         embedding_model=settings.embedding_model,

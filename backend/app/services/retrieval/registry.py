@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from backend.app.services.ingestion.chunker import LegalChunk
 from backend.app.services.retrieval.base import Retriever
 from backend.app.services.retrieval.bm25 import BM25Retriever
@@ -21,16 +23,21 @@ class RetrieverRegistry:
         self._bm25 = BM25Retriever(chunks)
         self._retrievers["bm25"] = self._bm25
         self._dense: DenseRetriever | None = None
+        self._dense_lock = threading.Lock()
         self._dense_settings = (embedding_model, alpha, fusion_method, rrf_k)
 
     def get(self, name: str) -> Retriever:
         if (name == "dense" or name == "hybrid") and self._dense is None:
-            model, alpha, method, rrf_k = self._dense_settings
-            self._dense = DenseRetriever(self._chunks, model_name=model)
-            self._retrievers["dense"] = self._dense
-            self._retrievers["hybrid"] = HybridRetriever(
-                self._bm25, self._dense, method=method, alpha=alpha, rrf_k=rrf_k
-            )
+            with self._dense_lock:
+                if self._dense is None:
+                    model, alpha, method, rrf_k = self._dense_settings
+                    dense = DenseRetriever(self._chunks, model_name=model)
+                    hybrid = HybridRetriever(
+                        self._bm25, dense, method=method, alpha=alpha, rrf_k=rrf_k
+                    )
+                    self._retrievers["dense"] = dense
+                    self._retrievers["hybrid"] = hybrid
+                    self._dense = dense
         try:
             return self._retrievers[name]
         except KeyError as error:

@@ -1,0 +1,62 @@
+{
+  "run_id": "aila-2019-bm25",
+  "dataset_name": "AILA 2019 Precedent & Statute Retrieval Task",
+  "source_url": "https://doi.org/10.5281/zenodo.4063986",
+  "license": "CC BY 4.0",
+  "attribution": "Paheli Bhattacharya, Kripabandhu Ghosh, Saptarshi Ghosh, Arindam Pal, Parth Mehta, Arnab Bhattacharya, and Prasenjit Majumder",
+  "evaluation_protocol": "Official AILA queries evaluated separately for prior-case and statute retrieval; BM25 top-10 passages deduplicated by document; task-specific judged pools. Relevant judgments absent from the indexed corpus remain in metric denominators.",
+  "query_count": 100,
+  "document_count": 3111,
+  "chunk_count": 24178,
+  "systems": {
+    "bm25": {
+      "precision@5": 0.068,
+      "precision@10": 0.046000000000000006,
+      "recall@5": 0.09026923076923078,
+      "recall@10": 0.1287237762237762,
+      "map": 0.07065596209346209,
+      "mrr": 0.16187301587301586,
+      "ndcg@10": 0.11016729591325519
+    }
+  },
+  "tasks": {
+    "priorcases": {
+      "query_count": 50,
+      "document_count": 2914,
+      "chunk_count": 23888,
+      "missing_judged_document_ids": [],
+      "missing_judged_document_count": 0,
+      "systems": {
+        "bm25": {
+          "precision@5": 0.068,
+          "precision@10": 0.044000000000000004,
+          "recall@5": 0.0972051282051282,
+          "recall@10": 0.13711421911421912,
+          "map": 0.08543692418692418,
+          "mrr": 0.15474603174603174,
+          "ndcg@10": 0.11852140595430401
+        }
+      }
+    },
+    "statutes": {
+      "query_count": 50,
+      "document_count": 197,
+      "chunk_count": 290,
+      "missing_judged_document_ids": [
+        "S58"
+      ],
+      "missing_judged_document_count": 1,
+      "systems": {
+        "bm25": {
+          "precision@5": 0.068,
+          "precision@10": 0.048,
+          "recall@5": 0.08333333333333334,
+          "recall@10": 0.12033333333333333,
+          "map": 0.055875,
+          "mrr": 0.16899999999999998,
+          "ndcg@10": 0.1018131858722064
+        }
+      }
+    }
+  }
+}

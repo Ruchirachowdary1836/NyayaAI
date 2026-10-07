@@ -37,7 +37,13 @@ class DenseRetriever:
             model = SentenceTransformer(model_name)
 
             def encode(texts: list[str]) -> np.ndarray:
-                vectors = model.encode(texts, normalize_embeddings=True)
+                vectors = model.encode(
+                    texts,
+                    batch_size=16,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                )
                 return np.asarray(vectors, dtype=np.float32)
 
             self._encoder = encode

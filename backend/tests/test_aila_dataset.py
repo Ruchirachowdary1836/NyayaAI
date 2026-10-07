@@ -4,7 +4,7 @@ from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
-from scripts.fetch_aila_corpus import _normalize_archive
+from scripts.fetch_aila_corpus import _normalize_archive, _normalize_evaluation_data
 
 
 def test_normalizes_aila_cases_and_statutes_with_attribution():
@@ -31,3 +31,35 @@ def test_rejects_unexpected_dataset_counts():
 
     with pytest.raises(ValueError, match="Unexpected AILA archive contents"):
         _normalize_archive(archive_buffer.getvalue(), 2, 0)
+
+
+def test_normalizes_official_aila_queries_and_task_qrels():
+    archive_buffer = BytesIO()
+    with ZipFile(archive_buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("Query_doc.txt", "AILA_Q1||case facts\nAILA_Q2||statute facts\n")
+        archive.writestr(
+            "relevance_judgments_priorcases.txt",
+            "AILA_Q1 Q0 C1 1\nAILA_Q1 Q0 C2 0\nAILA_Q2 Q0 C1 0\n",
+        )
+        archive.writestr(
+            "relevance_judgments_statutes.txt",
+            "AILA_Q1 Q0 S1 0\nAILA_Q2 Q0 S2 1\n",
+        )
+
+    queries, qrels = _normalize_evaluation_data(
+        archive_buffer.getvalue(),
+        expected_query_count=2,
+    )
+
+    assert len(queries) == 4
+    assert queries[0] == {
+        "query_id": "AILA_Q1_priorcases",
+        "text": "case facts",
+        "query_type": "priorcases",
+    }
+    assert qrels["priorcases"][0] == {
+        "query_id": "AILA_Q1_priorcases",
+        "doc_id": "C1",
+        "relevance": 1,
+    }
+    assert qrels["statutes"][1]["doc_id"] == "S2"

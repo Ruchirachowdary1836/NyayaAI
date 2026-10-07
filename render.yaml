@@ -34,6 +34,8 @@ services:
         value: data/processed/chunks.jsonl
       - key: DATA_DOCUMENTS_PATH
         value: data/processed/documents.jsonl
+      - key: EMBEDDING_MODEL
+        value: sentence-transformers/all-MiniLM-L6-v2
 
   - type: web
     name: nyayaai-web

@@ -32,6 +32,10 @@ frontend/.vite/
 *.sqlite3
 mlruns/
 wandb/
+evaluation/results/*
+!evaluation/results/aila-2019-bm25/
+evaluation/results/aila-2019-bm25/*
+!evaluation/results/aila-2019-bm25/metrics.json
 
 # OS/editor
 .DS_Store

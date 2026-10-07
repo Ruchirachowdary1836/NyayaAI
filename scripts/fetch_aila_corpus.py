@@ -67,6 +67,10 @@ def _normalize_archive(
 
 
 def fetch_documents() -> list[dict[str, object]]:
+    return _normalize_archive(_download_archive())
+
+
+def _download_archive() -> bytes:
     request = urllib.request.Request(
         ARCHIVE_URL, headers={"User-Agent": "NyayaAI/0.1 (AILA CC BY 4.0 corpus ingestion)"}
     )
@@ -75,20 +79,87 @@ def fetch_documents() -> list[dict[str, object]]:
     checksum = hashlib.md5(archive_bytes, usedforsecurity=False).hexdigest()
     if checksum != ARCHIVE_MD5:
         raise ValueError(f"AILA archive checksum mismatch: got {checksum}")
-    return _normalize_archive(archive_bytes)
+    return archive_bytes
+
+
+def _normalize_evaluation_data(
+    archive_bytes: bytes,
+    expected_query_count: int = 50,
+) -> tuple[list[dict[str, object]], dict[str, list[dict[str, object]]]]:
+    with zipfile.ZipFile(BytesIO(archive_bytes)) as archive:
+        queries: list[dict[str, object]] = []
+        for line in archive.read("Query_doc.txt").decode("utf-8").splitlines():
+            query_id, separator, text = line.partition("||")
+            if not separator or not query_id.strip() or not text.strip():
+                raise ValueError(f"Invalid AILA query record: {line[:80]}")
+            for task in ("priorcases", "statutes"):
+                queries.append(
+                    {
+                        "query_id": f"{query_id.strip()}_{task}",
+                        "text": text.strip(),
+                        "query_type": task,
+                    }
+                )
+        if len(queries) != expected_query_count * 2:
+            raise ValueError(
+                f"Expected {expected_query_count} AILA queries, found {len(queries) // 2}"
+            )
+
+        qrels_by_task: dict[str, list[dict[str, object]]] = {}
+        for task, filename in (
+            ("priorcases", "relevance_judgments_priorcases.txt"),
+            ("statutes", "relevance_judgments_statutes.txt"),
+        ):
+            qrels: list[dict[str, object]] = []
+            for line in archive.read(filename).decode("utf-8").splitlines():
+                fields = line.split()
+                if len(fields) != 4:
+                    raise ValueError(f"Invalid AILA relevance judgment: {line[:80]}")
+                query_id, _, document_id, relevance = fields
+                qrels.append(
+                    {
+                        "query_id": f"{query_id}_{task}",
+                        "doc_id": document_id,
+                        "relevance": int(relevance),
+                    }
+                )
+            if not qrels:
+                raise ValueError(f"AILA relevance judgments are empty: {filename}")
+            qrels_by_task[task] = qrels
+    return queries, qrels_by_task
+
+
+def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as output:
+        for record in records:
+            output.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download and normalize the AILA 2019 corpus.")
     parser.add_argument("--output", type=Path, required=True, help="Output JSONL path")
-    output_path = parser.parse_args().output
+    parser.add_argument(
+        "--evaluation-output-dir",
+        type=Path,
+        help="Optional directory for licensed official queries and relevance judgments",
+    )
+    args = parser.parse_args()
 
-    records = fetch_documents()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8", newline="\n") as output:
-        for record in records:
-            output.write(json.dumps(record, ensure_ascii=False) + "\n")
-    print(f"Wrote {len(records)} AILA documents to {output_path}")
+    archive_bytes = _download_archive()
+    records = _normalize_archive(archive_bytes)
+    _write_jsonl(args.output, records)
+    print(f"Wrote {len(records)} AILA documents to {args.output}")
+    if args.evaluation_output_dir:
+        queries, qrels_by_task = _normalize_evaluation_data(archive_bytes)
+        _write_jsonl(args.evaluation_output_dir / "queries.jsonl", queries)
+        for task, qrels in qrels_by_task.items():
+            _write_jsonl(args.evaluation_output_dir / f"qrels_{task}.jsonl", qrels)
+        print(
+            f"Wrote {len(queries)} task queries and "
+            f"{sum(map(len, qrels_by_task.values()))} relevance judgments "
+            f"to {args.evaluation_output_dir}"
+        )
 
 
 if __name__ == "__main__":

@@ -56,6 +56,18 @@ export interface ExperimentRun {
   query_count?: number;
   document_count?: number;
   chunk_count?: number;
+  dataset_name?: string;
+  source_url?: string;
+  license?: string;
+  attribution?: string;
+  evaluation_protocol?: string;
+  tasks?: Record<string, {
+    query_count: number;
+    document_count: number;
+    chunk_count: number;
+    missing_judged_document_ids?: string[];
+    systems: Record<string, Record<string, number>>;
+  }>;
   systems?: Record<string, Record<string, number>>;
   comparisons?: Record<string, unknown>;
 }

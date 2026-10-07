@@ -61,20 +61,35 @@ class BM25Retriever:
         if not query_tokens or not self._postings:
             return []
         scores = np.zeros(len(self.chunks), dtype=np.float64)
-        candidates: set[int] = set()
-        for term in query_tokens:
+        candidate_mask = np.zeros(len(self.chunks), dtype=np.bool_)
+        for term, query_frequency in Counter(query_tokens).items():
             postings = self._postings.get(term)
             if postings is None:
                 continue
             document_indices = np.frombuffer(postings[0], dtype=np.uint32)
             frequencies = np.frombuffer(postings[1], dtype=np.uint32)
-            candidates.update(int(index) for index in document_indices)
+            candidate_mask[document_indices] = True
             document_lengths = self._doc_lengths[document_indices]
             denominator = frequencies + self.k1 * (
                 1 - self.b + self.b * document_lengths / self._average_doc_length
             )
-            scores[document_indices] += self._idf[term] * frequencies * (self.k1 + 1) / denominator
-        ranked = sorted(candidates, key=lambda index: (-float(scores[index]), index))[:k]
+            scores[document_indices] += (
+                query_frequency * self._idf[term] * frequencies * (self.k1 + 1) / denominator
+            )
+        candidate_indices = np.flatnonzero(candidate_mask)
+        if not len(candidate_indices):
+            return []
+        candidate_scores = scores[candidate_indices]
+        if len(candidate_indices) > k:
+            threshold = np.partition(candidate_scores, -k)[-k]
+            higher = candidate_indices[candidate_scores > threshold]
+            tied = candidate_indices[candidate_scores == threshold]
+            remaining = k - len(higher)
+            candidate_indices = np.concatenate((higher, tied[:remaining]))
+        ranked = sorted(
+            (int(index) for index in candidate_indices),
+            key=lambda index: (-float(scores[index]), index),
+        )
         return [
             Hit(
                 doc_id=self.chunks[index].doc_id,

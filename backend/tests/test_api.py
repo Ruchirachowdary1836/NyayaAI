@@ -4,6 +4,7 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 from backend.app.api.v1.feedback import initialize_feedback_store
 from backend.app.core.security import create_access_token
 from backend.app.main import app
@@ -285,3 +286,14 @@ def test_runtime_initialization_failure_is_reported_without_exposing_details(mon
         )
         assert search.status_code == 503
         assert search.json()["status"] == "failed"
+
+
+def test_production_initialization_rejects_missing_corpus(monkeypatch, tmp_path: Path) -> None:
+    from backend.app import main
+
+    monkeypatch.setattr(main.settings, "app_env", "production")
+    monkeypatch.setattr(main.settings, "data_chunks_path", str(tmp_path / "chunks.jsonl"))
+    monkeypatch.setattr(main.settings, "data_documents_path", str(tmp_path / "documents.jsonl"))
+
+    with pytest.raises(RuntimeError, match="non-empty processed chunk index"):
+        main._initialize_runtime(app)

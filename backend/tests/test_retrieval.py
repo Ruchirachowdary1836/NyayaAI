@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -155,3 +157,27 @@ def test_registry_loads_bm25_without_eagerly_loading_dense_model() -> None:
     assert registry.get("bm25").search("no corpus") == []
     assert registry.document_count == 0
     assert registry.available == ["bm25", "dense", "hybrid"]
+
+
+def test_registry_initializes_dense_engine_once_for_concurrent_requests(monkeypatch) -> None:
+    from backend.app.services.retrieval import registry as registry_module
+
+    calls = 0
+
+    class FakeDense:
+        def __init__(self, chunks, model_name) -> None:
+            nonlocal calls
+            calls += 1
+            time.sleep(0.02)
+
+        def search(self, query: str, k: int = 10) -> list[Hit]:
+            return []
+
+    monkeypatch.setattr(registry_module, "DenseRetriever", FakeDense)
+    registry = RetrieverRegistry([])
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        retrievers = list(executor.map(lambda _: registry.get("hybrid"), range(16)))
+
+    assert calls == 1
+    assert all(retriever is retrievers[0] for retriever in retrievers)

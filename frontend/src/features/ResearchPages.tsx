@@ -132,8 +132,9 @@ export function ExperimentsPage() {
         <div className="experiment-summary"><span>STATISTICAL TEST</span><strong className="summary-word">{Object.keys(runs?.[0]?.comparisons ?? {}).length ? 'Paired' : 'Not run'}</strong><small>Only when systems are compared</small></div>
       </div>
       <section className="chart-panel"><div className="panel-heading"><div><span className="section-kicker">LATEST REPRODUCIBLE RUN</span><h2>Retrieval quality by system</h2></div>{runs?.[0] && <span className="run-label"><span /> {runs[0].run_id}</span>}</div>{isLoading ? <div className="loading-card"><LoaderCircle className="spin" /> Loading experiment runs…</div> : runs?.length ? <MetricChart runs={runs} /> : <div className="chart-empty"><FlaskConical size={22} /><span>No completed metrics to visualize yet.</span><small>Prepare authorized corpus, query, and relevance-judgment files, then run <code>make experiment</code>.</small></div>}</section>
-      {runs?.[0] && <div className="experiment-run-details"><div><span className="section-kicker">RUN METADATA</span><h2>Reproducibility record</h2></div><div className="run-detail-grid"><span>Run identifier</span><strong>{runs[0].run_id}</strong><span>Queries evaluated</span><strong>{runs[0].query_count ?? '—'}</strong><span>Documents / chunks</span><strong>{runs[0].document_count ?? '—'} / {runs[0].chunk_count ?? '—'}</strong><span>Fixed random seed</span><strong>{runs[0].seed ?? '—'}</strong></div></div>}
-      <div className="research-note"><ShieldCheck size={16} /><p>Metrics remain blank until an evaluation is actually run. NyayaAI does not fabricate or prefill benchmark scores.</p></div>
+      {runs?.[0] && <div className="experiment-run-details"><div><span className="section-kicker">RUN METADATA</span><h2>Reproducibility record</h2></div><div className="run-detail-grid"><span>Run identifier</span><strong>{runs[0].run_id}</strong><span>Dataset</span><strong>{runs[0].dataset_name ?? 'Unspecified dataset'}</strong><span>Queries evaluated</span><strong>{runs[0].query_count ?? '—'}</strong><span>Documents / chunks</span><strong>{runs[0].document_count ?? '—'} / {runs[0].chunk_count ?? '—'}</strong><span>Protocol</span><strong>{runs[0].evaluation_protocol ?? 'Not recorded'}</strong><span>License</span><strong>{runs[0].license ?? 'Not recorded'}</strong></div>{runs[0].source_url && <div className="research-note"><ShieldCheck size={16} /><p>{runs[0].attribution}. Dataset license: {runs[0].license}. <a href={runs[0].source_url} target="_blank" rel="noreferrer">View source record</a>.</p></div>}</div>}
+      {runs?.[0]?.tasks && <div className="benchmark-task-grid">{Object.entries(runs[0].tasks).map(([task, result]) => <article className="benchmark-task-card" key={task}><span className="section-kicker">{task === 'priorcases' ? 'PRIOR-CASE RETRIEVAL' : 'STATUTE RETRIEVAL'}</span><strong>{result.query_count} queries · {result.document_count} judged candidates</strong><div><span>MAP</span><b>{result.systems.bm25?.map?.toFixed(3) ?? '—'}</b><span>MRR</span><b>{result.systems.bm25?.mrr?.toFixed(3) ?? '—'}</b><span>nDCG@10</span><b>{result.systems.bm25?.['ndcg@10']?.toFixed(3) ?? '—'}</b></div>{Boolean(result.missing_judged_document_ids?.length) && <small>Source qrels include missing corpus documents: {result.missing_judged_document_ids?.join(', ')}. These relevant items remain counted in the evaluation.</small>}</article>)}</div>}
+      <div className="research-note"><ShieldCheck size={16} /><p>{runs?.length ? 'Benchmark values are computed from recorded runs on the cited dataset and relevance judgments. Systems without measured results are not plotted as zero.' : 'No recorded evaluation is available in this environment. NyayaAI does not fabricate or prefill benchmark scores.'}</p></div>
     </div>
   );
 }
@@ -194,7 +195,11 @@ export function AdminPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [register, setRegister] = useState(false);
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 30000 });
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: api.health,
+    refetchInterval: (query) => query.state.data?.status === 'initializing' ? 5000 : 30000,
+  });
   const authenticate = useMutation({
     mutationFn: () => api.authenticate(username, password, register),
     onSuccess: (session) => {

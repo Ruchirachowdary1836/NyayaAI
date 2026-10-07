@@ -293,6 +293,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .experiment-run-details { display: flex; align-items: flex-start; justify-content: space-between; gap: 30px; padding: 18px; margin-top: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .run-detail-grid { display: grid; grid-template-columns: auto auto; gap: 9px 18px; color: #878c83; font-size: 8px; }
 .run-detail-grid strong { color: #42534b; font-family: 'DM Mono', monospace; font-size: 8px; text-align: right; }
+.benchmark-task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 14px; }
+.benchmark-task-card { display: flex; flex-direction: column; gap: 10px; padding: 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.benchmark-task-card > strong { color: #405347; font-size: 10px; font-weight: 600; }
+.benchmark-task-card > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.benchmark-task-card > div span { color: #8b9087; font-size: 8px; }
+.benchmark-task-card > div b { color: #304158; font-family: 'DM Mono', monospace; font-size: 11px; }
+.benchmark-task-card > small { color: #8b7651; font-size: 8px; line-height: 1.5; }
 .research-note { display: flex; align-items: center; gap: 8px; padding: 11px 13px; margin-top: 12px; border-radius: 7px; color: #788974; background: #f0f3ed; }
 .research-note p { margin: 0; color: #737c71; font-size: 8px; line-height: 1.5; }
 .library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 11px 13px; margin: 19px 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
@@ -404,7 +411,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .dark-mode .result-meta, .dark-mode .text-action, .dark-mode .result-court, .dark-mode .result-year { color: #afb7ae; }
 .dark-mode .evidence-summary, .dark-mode .evidence-footnote, .dark-mode .evidence-legend, .dark-mode .evidence-item:hover { background: #1c2731; }
 .dark-mode .compare-query-label strong, .dark-mode .compare-hit > p, .dark-mode .document-list-copy > p, .dark-mode .passage-card > p, .dark-mode .admin-checklist > p { color: #b6bdb7; }
-.dark-mode .source-score-grid, .dark-mode .search-console, .dark-mode .answer-card, .dark-mode .compare-query-form, .dark-mode .compare-column, .dark-mode .chart-panel, .dark-mode .experiment-summary, .dark-mode .experiment-run-details, .dark-mode .library-toolbar, .dark-mode .document-list-item, .dark-mode .document-reader, .dark-mode .admin-status-banner, .dark-mode .admin-metric, .dark-mode .admin-checklist, .dark-mode .roadmap-card, .dark-mode .answer-sources { background: #202a35; }
+.dark-mode .source-score-grid, .dark-mode .search-console, .dark-mode .answer-card, .dark-mode .compare-query-form, .dark-mode .compare-column, .dark-mode .chart-panel, .dark-mode .experiment-summary, .dark-mode .experiment-run-details, .dark-mode .benchmark-task-card, .dark-mode .library-toolbar, .dark-mode .document-list-item, .dark-mode .document-reader, .dark-mode .admin-status-banner, .dark-mode .admin-metric, .dark-mode .admin-checklist, .dark-mode .roadmap-card, .dark-mode .answer-sources { background: #202a35; }
 .dark-mode .compare-hit:hover, .dark-mode .result-card:hover { background: #242f39; }
 .dark-mode .empty-corpus, .dark-mode .empty-state-card { border-color: #39443f; background: #202b30; }
 .dark-mode .empty-corpus strong, .dark-mode .empty-state-card h2 { color: #d9dfd8; }
