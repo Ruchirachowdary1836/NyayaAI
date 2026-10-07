@@ -56,11 +56,26 @@ export interface ExperimentRun {
 }
 
 export interface AuthSession { access_token: string; token_type: string; role: 'user' | 'admin' }
+export interface UserProfile { username: string; role: 'user' | 'admin' }
 export interface AdminOverview { corpus_documents: number; corpus_chunks: number; experiment_runs: number; users: number }
 export interface AdminUser { username: string; role: string; created_at: string }
 
+async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      const url = new URL(input instanceof Request ? input.url : input.toString(), window.location.origin);
+      throw new Error(
+        `Could not reach the NyayaAI API at ${url.origin}. Check the API service URL and deployment status.`,
+      );
+    }
+    throw error;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit, token?: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetchApi(`${API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -82,7 +97,14 @@ async function request<T>(path: string, init?: RequestInit, token?: string): Pro
 }
 
 export const api = {
-  health: () => request<{ status: string; corpus_documents?: number; corpus_chunks?: number }>('/ready'),
+  health: () =>
+    request<{
+      status: string;
+      corpus_documents?: number;
+      corpus_chunks?: number;
+      generation_configured?: boolean;
+      generation_provider?: string;
+    }>('/ready'),
   search: (query: string, retriever: Retriever, k = 10) =>
     request<SearchResponse>('/api/v1/search', {
       method: 'POST',
@@ -99,11 +121,11 @@ export const api = {
     onToken: (token: string) => void,
     k = 8,
   ): Promise<QAResponse> => {
-    const url = new URL(`${API_BASE}/api/v1/qa/stream`);
+    const url = new URL(`${API_BASE}/api/v1/qa/stream`, window.location.origin);
     url.searchParams.set('query', query);
     url.searchParams.set('retriever', retriever);
     url.searchParams.set('k', String(k));
-    const response = await fetch(url, { headers: { Accept: 'text/event-stream' } });
+    const response = await fetchApi(url, { headers: { Accept: 'text/event-stream' } });
     if (!response.ok || !response.body) {
       let detail = `Answer stream failed (${response.status})`;
       try {
@@ -164,6 +186,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
+  profile: (token: string) => request<UserProfile>('/api/v1/auth/me', undefined, token),
+  updateProfile: (
+    token: string,
+    payload: { current_password: string; username: string; new_password?: string },
+  ) =>
+    request<AuthSession>(
+      '/api/v1/auth/me',
+      { method: 'PUT', body: JSON.stringify(payload) },
+      token,
+    ),
   adminOverview: (token: string) =>
     request<AdminOverview>('/api/v1/admin/overview', undefined, token),
   adminUsers: (token: string) =>

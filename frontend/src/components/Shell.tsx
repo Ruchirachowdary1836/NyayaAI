@@ -1,16 +1,10 @@
 import { motion } from 'framer-motion';
 import {
   Activity,
-  ArrowUpRight,
   BookOpenText,
   ChartNoAxesCombined,
-  Command,
-  FileSearch,
   FlaskConical,
-  Gavel,
-  Github,
   Languages,
-  LayoutDashboard,
   Menu,
   Moon,
   Scale,
@@ -19,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
+  UserRound,
   X,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -96,8 +91,10 @@ export function Shell() {
             <div><strong>Evidence first</strong><span>Every answer traces back to a source.</span></div>
           </div>
           <div className="sidebar-profile">
-            <div className="avatar">R</div>
-            <div className="profile-copy"><strong>Researcher</strong><span>Local workspace</span></div>
+            <NavLink to="/profile" className="profile-identity" onClick={() => setMenuOpen(false)}>
+              <span className="avatar"><UserRound size={15} /></span>
+              <span className="profile-copy"><strong>Research profile</strong><span>Manage your account</span></span>
+            </NavLink>
             <button className="icon-button" onClick={toggleTheme} aria-label="Toggle color theme">
               {dark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
@@ -111,11 +108,7 @@ export function Shell() {
         <header className="topbar">
           <div className="breadcrumb"><span>NyayaAI</span><span className="breadcrumb-slash">/</span><strong>Research & discovery</strong></div>
           <div className="topbar-actions">
-            <div className="environment-badge"><span /> Research environment</div>
-            <a className="icon-button github-link" href="https://github.com/Ruchirachowdary1836/NyayaAI" target="_blank" rel="noreferrer" aria-label="Open GitHub repository">
-              <Github size={18} />
-            </a>
-            <div className="avatar avatar-small">R</div>
+            <NavLink className="profile-link" to="/profile"><UserRound size={16} /><span>Edit profile</span></NavLink>
           </div>
         </header>
         <motion.div

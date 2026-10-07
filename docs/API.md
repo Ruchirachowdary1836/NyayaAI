@@ -16,13 +16,14 @@ The FastAPI service publishes its interactive OpenAPI reference at `/docs` and i
 | `GET` | `/api/v1/experiments/{run_id}` | Read metrics for one validated run ID. |
 | `POST` | `/api/v1/feedback` | Record an optional correctness score and helpfulness rating. |
 
-Search and QA bodies contain `query`, a retriever name, and `k`. QA also accepts `query_type`: `auto`, `statute_lookup`, `conceptual`, or `fact_pattern`. Invalid inputs return standard FastAPI validation responses. Dense and hybrid retrieval require the configured local sentence-transformer model. QA requires Ollama with the configured model available. No substitute generator is silently used if it is unavailable.
+Search and QA bodies contain `query`, a retriever name, and `k`. QA also accepts `query_type`: `auto`, `statute_lookup`, `conceptual`, or `fact_pattern`. Invalid inputs return standard FastAPI validation responses. Dense and hybrid retrieval require the configured sentence-transformer model. Local QA uses Ollama; Render QA uses the configured OpenAI-compatible provider. Render requires `GENERATOR_API_KEY`; absent credentials or provider failures are surfaced, never replaced with mock answers.
 
 ## Authentication and administration
 
 - `POST /api/v1/auth/register` accepts a username and password (minimum 8 characters) and creates a `user` account.
 - `POST /api/v1/auth/token` exchanges JSON username/password credentials for a signed JWT bearer token.
 - `GET /api/v1/auth/me` returns the authenticated username and role.
+- `PUT /api/v1/auth/me` updates the username and/or password after confirming the current password. It returns a replacement JWT and invalidates the old username-bound token.
 - `GET /api/v1/admin/overview` and `GET /api/v1/admin/users` require the `admin` role.
 - Bootstrap an initial administrator using `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD` before the backend's first start. The initial account is created only if that username does not already exist.
 - Passwords are salted and hashed with PBKDF2-HMAC-SHA256. Use a unique high-entropy `JWT_SECRET_KEY` outside local development.

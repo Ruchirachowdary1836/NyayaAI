@@ -7,6 +7,7 @@ import {
   DocumentLibraryPage,
   DocumentPage,
   ExperimentsPage,
+  ProfilePage,
   RoadmapPage,
 } from './features/ResearchPages';
 
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="documents" element={<DocumentLibraryPage />} />
         <Route path="documents/:documentId" element={<DocumentPage />} />
         <Route path="admin" element={<AdminPage />} />
+        <Route path="profile" element={<ProfilePage />} />
         <Route path="roadmap" element={<RoadmapPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

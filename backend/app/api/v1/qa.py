@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from backend.app.schemas.retrieval import PassageResponse, QARequest, QAResponse
 from backend.app.services.explain.confidence import confidence_score
 from backend.app.services.generation.citation_checker import audit_citations
-from backend.app.services.generation.llm import OllamaGenerator
+from backend.app.services.generation.llm import OllamaGenerator, OpenAICompatibleGenerator
 from backend.app.services.generation.prompts import DISCLAIMER, build_prompt
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -116,7 +116,7 @@ async def stream_answer(
                 + "\n\n"
             )
             return
-        generator: OllamaGenerator = request.app.state.generator
+        generator: OllamaGenerator | OpenAICompatibleGenerator = request.app.state.generator
         try:
             prompt = build_prompt(query, [hit.text for hit in hits[:5]], query_type)
             fragments: list[str] = []

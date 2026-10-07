@@ -16,6 +16,7 @@ from sqlalchemy import (
     func,
     insert,
     select,
+    update,
 )
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy.exc import IntegrityError
@@ -116,6 +117,32 @@ class Database:
                 select(users.c.role).where(users.c.username == username)
             ).scalar_one_or_none()
         return role
+
+    def update_user_credentials(
+        self,
+        current_username: str,
+        new_username: str,
+        password_hash: bytes | None = None,
+        password_salt: bytes | None = None,
+    ) -> bool:
+        values: dict[str, object] = {"username": new_username}
+        if password_hash is not None and password_salt is not None:
+            values.update(password_hash=password_hash, password_salt=password_salt)
+        try:
+            with self.engine.begin() as connection:
+                result = connection.execute(
+                    update(users).where(users.c.username == current_username).values(**values)
+                )
+        except IntegrityError:
+            return False
+        return result.rowcount == 1
+
+    def get_user_profile(self, username: str) -> tuple[str, str] | None:
+        with self.engine.connect() as connection:
+            row = connection.execute(
+                select(users.c.username, users.c.role).where(users.c.username == username)
+            ).first()
+        return (str(row.username), str(row.role)) if row else None
 
     def list_users(self) -> list[tuple[str, str, str]]:
         with self.engine.connect() as connection:

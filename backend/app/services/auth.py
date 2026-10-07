@@ -48,6 +48,25 @@ def authenticate(store_config: DatabaseConfig, username: str, password: str) -> 
     return str(role)
 
 
+def update_profile(
+    store_config: DatabaseConfig,
+    username: str,
+    current_password: str,
+    new_username: str,
+    new_password: str | None = None,
+) -> bool:
+    if authenticate(store_config, username, current_password) is None:
+        return False
+    password_hash = None
+    password_salt = None
+    if new_password:
+        password_salt = secrets.token_bytes(16)
+        password_hash = _hash_password(new_password, password_salt)
+    return as_database(store_config).update_user_credentials(
+        username, new_username, password_hash, password_salt
+    )
+
+
 def get_current_user(
     request: Request, credentials: HTTPAuthorizationCredentials | None
 ) -> dict[str, str]:

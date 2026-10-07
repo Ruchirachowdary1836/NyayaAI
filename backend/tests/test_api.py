@@ -111,6 +111,49 @@ def test_registration_login_and_admin_role_enforcement(tmp_path: Path) -> None:
         assert {user["role"] for user in users.json()} == {"user", "admin"}
 
 
+def test_user_can_edit_profile_and_old_token_is_revoked(tmp_path: Path) -> None:
+    with TestClient(app) as client:
+        auth_path = tmp_path / "profile.db"
+        initialize_auth_store(auth_path)
+        app.state.auth_db = auth_path
+        registration = client.post(
+            "/api/v1/auth/register",
+            json={"username": "researcher", "password": "long-password"},
+        )
+        old_token = registration.json()["access_token"]
+        response = client.put(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {old_token}"},
+            json={
+                "current_password": "long-password",
+                "username": "legal-researcher",
+                "new_password": "new-long-password",
+            },
+        )
+        assert response.status_code == 200
+        new_token = response.json()["access_token"]
+        assert client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {new_token}"}
+        ).json() == {"username": "legal-researcher", "role": "user"}
+        assert (
+            client.get(
+                "/api/v1/auth/me", headers={"Authorization": f"Bearer {old_token}"}
+            ).status_code
+            == 401
+        )
+        login = client.post(
+            "/api/v1/auth/token",
+            json={"username": "legal-researcher", "password": "new-long-password"},
+        )
+        assert login.status_code == 200
+        wrong_password = client.put(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {new_token}"},
+            json={"current_password": "wrong-password", "username": "legal-researcher"},
+        )
+        assert wrong_password.status_code == 401
+
+
 def test_qa_stream_emits_tokens_and_audited_completion(tmp_path: Path) -> None:
     class Generator:
         async def stream(self, prompt: str):
@@ -132,4 +175,26 @@ def test_qa_stream_emits_tokens_and_audited_completion(tmp_path: Path) -> None:
     assert (
         '"disclaimer": "For informational purposes only; this is not legal advice."'
         in response.text
+    )
+
+
+def test_qa_does_not_fabricate_answer_when_provider_key_is_missing() -> None:
+    from backend.app.services.generation.llm import OpenAICompatibleGenerator
+
+    with TestClient(app) as client:
+        text = "Section 482 CrPC permits the High Court to exercise inherent powers."
+        app.state.retrievers = RetrieverRegistry(
+            [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))]
+        )
+        app.state.generator = OpenAICompatibleGenerator(
+            "", model="gpt-4o-mini", base_url="https://api.openai.com/v1"
+        )
+        response = client.post(
+            "/api/v1/qa",
+            json={"query": "Section 482 CrPC", "retriever": "bm25", "k": 5},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "AI answer generation is not configured. Set GENERATOR_API_KEY in the API service."
     )

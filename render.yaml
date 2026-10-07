@@ -18,6 +18,14 @@ services:
         generateValue: true
       - key: CORS_ORIGINS
         value: '["https://nyayaai-web.onrender.com"]'
+      - key: GENERATOR_PROVIDER
+        value: openai
+      - key: GENERATOR_MODEL
+        value: gpt-4o-mini
+      - key: GENERATOR_API_BASE_URL
+        value: https://api.openai.com/v1
+      - key: GENERATOR_API_KEY
+        sync: false
       - key: INITIAL_ADMIN_USERNAME
         sync: false
       - key: INITIAL_ADMIN_PASSWORD

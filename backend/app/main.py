@@ -18,7 +18,7 @@ from backend.app.core.config import settings
 from backend.app.core.logging import configure_logging
 from backend.app.db.database import Database
 from backend.app.services.auth import initialize_auth_store
-from backend.app.services.generation.llm import OllamaGenerator
+from backend.app.services.generation.llm import build_generator
 from backend.app.services.retrieval.registry import RetrieverRegistry
 from backend.app.services.retrieval.service import load_chunks
 
@@ -33,8 +33,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         chunks,
         embedding_model=settings.embedding_model,
     )
-    application.state.generator = OllamaGenerator(
-        base_url=settings.ollama_base_url,
+    application.state.generator = build_generator(
+        provider=settings.generator_provider,
+        api_key=settings.generator_api_key,
+        api_base_url=settings.generator_api_base_url,
+        ollama_base_url=settings.ollama_base_url,
         model=settings.generator_model,
     )
     application.state.documents_path = Path(settings.data_documents_path)
@@ -119,8 +122,11 @@ def health() -> dict[str, str]:
 @app.get("/ready", tags=["health"])
 def ready() -> dict[str, str | int]:
     registry: RetrieverRegistry = app.state.retrievers
+    generator = app.state.generator
     return {
         "status": "ready",
         "corpus_documents": registry.document_count,
         "corpus_chunks": registry.corpus_size,
+        "generation_configured": generator.configured if hasattr(generator, "configured") else True,
+        "generation_provider": settings.generator_provider,
     }

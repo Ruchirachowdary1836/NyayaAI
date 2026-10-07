@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Sparkles,
   TriangleAlert,
+  UserRound,
 } from 'lucide-react';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
@@ -217,7 +218,7 @@ export function AdminPage() {
   return (
     <div className="subpage">
       <PageTitle eyebrow="LOCAL ADMINISTRATION" title="System health & data readiness." description="A transparent view of the local research services. Corpus and model availability are reported as observed, not assumed." />
-      <div className="admin-status-banner"><div className={`status-emblem ${health.isError ? 'status-emblem-error' : ''}`}>{health.isError ? <TriangleAlert size={21} /> : <Activity size={21} />}</div><div><span>API SERVICE</span><strong>{status}</strong><small>{health.isError ? health.error.message : 'Health checks refresh every 30 seconds.'}</small></div><span className={health.isError ? 'service-status failed' : 'service-status'}><i /> {status}</span></div>
+      <div className="admin-status-banner"><div className={`status-emblem ${health.isError ? 'status-emblem-error' : ''}`}>{health.isError ? <TriangleAlert size={21} /> : <Activity size={21} />}</div><div><span>API SERVICE</span><strong>{status}</strong><small>{health.isError ? health.error.message : `Health checks refresh every 30 seconds. ${health.data?.corpus_documents ?? 0} documents, ${health.data?.corpus_chunks ?? 0} indexed passages. AI generation ${health.data?.generation_configured ? 'configured' : 'not configured'}.`}</small></div><span className={health.isError ? 'service-status failed' : 'service-status'}><i /> {status}</span></div>
       {!token && <form className="admin-login-card" onSubmit={(event) => { event.preventDefault(); authenticate.mutate(); }}>
         <div><LockKeyhole size={18} /><h2>{register ? 'Create a researcher account' : 'Administrator sign-in'}</h2><p>Admin access requires credentials bootstrapped with <code>INITIAL_ADMIN_USERNAME</code> and <code>INITIAL_ADMIN_PASSWORD</code>. New accounts have the user role.</p></div>
         <label>Username<input autoComplete="username" minLength={3} value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
@@ -233,6 +234,74 @@ export function AdminPage() {
         {users.data && <section className="admin-user-list"><div><span className="section-kicker">ACCESS CONTROL</span><h2>Workspace users</h2></div>{users.data.map((user) => <div key={user.username}><span>{user.username}</span><strong className={`user-role role-${user.role}`}>{user.role}</strong><small>{user.created_at}</small></div>)}</section>}
       </>}
       <section className="admin-checklist"><div><span className="section-kicker">SERVICE CHECKLIST</span><h2>What is connected</h2></div><p><CheckCircle2 size={16} /> API and health probes</p><p><CheckCircle2 size={16} /> JWT access tokens with user/admin roles</p><p><CheckCircle2 size={16} /> Rate-limited requests with request IDs</p><p><CheckCircle2 size={16} /> File-backed local corpus index</p><p><TriangleAlert size={16} /> Never ingest or publish data unless its license permits it.</p></section>
+    </div>
+  );
+}
+
+export function ProfilePage() {
+  const [token, setToken] = useState(() => localStorage.getItem('nyayaai-token') ?? '');
+  const [username, setUsername] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const profile = useQuery({
+    queryKey: ['profile', token],
+    queryFn: () => api.profile(token),
+    enabled: Boolean(token),
+    retry: false,
+  });
+  const signIn = useMutation({
+    mutationFn: () => api.authenticate(loginUsername, loginPassword),
+    onSuccess: (session) => {
+      localStorage.setItem('nyayaai-token', session.access_token);
+      setToken(session.access_token);
+      setLoginPassword('');
+    },
+  });
+  const update = useMutation({
+    mutationFn: () =>
+      api.updateProfile(token, {
+        current_password: currentPassword,
+        username: username.trim(),
+        ...(newPassword ? { new_password: newPassword } : {}),
+      }),
+    onSuccess: (session) => {
+      localStorage.setItem('nyayaai-token', session.access_token);
+      setToken(session.access_token);
+      setCurrentPassword('');
+      setNewPassword('');
+    },
+  });
+  const signOut = () => {
+    localStorage.removeItem('nyayaai-token');
+    setToken('');
+  };
+
+  return (
+    <div className="subpage">
+      <PageTitle eyebrow="ACCOUNT SETTINGS" title="Your research profile." description="Update your NyayaAI username or password. Changes require your current password." />
+      {!token && <form className="admin-login-card" onSubmit={(event) => { event.preventDefault(); signIn.mutate(); }}>
+        <div><UserRound size={18} /><h2>Sign in to edit your profile</h2><p>Use your NyayaAI account. If you do not have one, create a researcher account from System health.</p></div>
+        <label>Username<input autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required /></label>
+        <label>Password<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required /></label>
+        {signIn.isError && <span className="auth-error" role="alert">{signIn.error.message}</span>}
+        <button className="primary-button" disabled={signIn.isPending}>{signIn.isPending ? <LoaderCircle className="spin" size={14} /> : null}Sign in <ArrowRight size={14} /></button>
+      </form>}
+      {token && profile.isLoading && <div className="loading-card"><LoaderCircle className="spin" /> Loading your profile…</div>}
+      {token && profile.isError && <div className="admin-access-warning"><TriangleAlert size={17} /><div><strong>Could not load this profile</strong><p>{profile.error.message}. Sign in again if your session has expired.</p></div><button className="text-action" onClick={signOut}>Sign out</button></div>}
+      {token && profile.data && <>
+        <div className="admin-access-bar"><span><UserRound size={15} /> Signed in as {profile.data.username} · {profile.data.role}</span><button className="text-action" onClick={signOut}>Sign out</button></div>
+        <form className="admin-login-card profile-edit-card" onSubmit={(event) => { event.preventDefault(); update.mutate(); }}>
+          <div><UserRound size={18} /><h2>Edit profile</h2><p>Leave the new password blank to keep your existing password. Updating your username or password signs you in again with a refreshed session.</p></div>
+          <label>Username<input autoComplete="username" minLength={3} maxLength={80} pattern="[A-Za-z0-9_.-]+" value={username || profile.data.username} onChange={(event) => setUsername(event.target.value)} required /></label>
+          <label>Current password<input type="password" autoComplete="current-password" minLength={8} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label>
+          <label>New password (optional)<input type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label>
+          {update.isError && <span className="auth-error" role="alert">{update.error.message}</span>}
+          {update.isSuccess && <span className="profile-success" role="status">Profile updated successfully.</span>}
+          <button className="primary-button" disabled={update.isPending}>{update.isPending ? <LoaderCircle className="spin" size={14} /> : null}Save profile <ArrowRight size={14} /></button>
+        </form>
+      </>}
     </div>
   );
 }
