@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   ArrowDownRight,
   ArrowRight,
@@ -30,7 +30,7 @@ const examples = [
   'Principles of natural justice in administrative law',
 ];
 
-const engines: { value: Retriever; label: string; detail: string }[] = [
+const engineOptions: { value: Retriever; label: string; detail: string }[] = [
   { value: 'hybrid', label: 'Hybrid', detail: 'Rank fusion of lexical and semantic evidence' },
   { value: 'bm25', label: 'BM25', detail: 'Lexical match for exact terms and provisions' },
   { value: 'dense', label: 'Dense', detail: 'Semantic similarity from a sentence-embedding model' },
@@ -53,22 +53,28 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   );
 }
 
-function SourceScores({ hit }: { hit: Hit }) {
+function SourceScores({ hit, retriever }: { hit: Hit; retriever: Retriever }) {
   return (
     <details className="source-score-details">
       <summary><CircleHelp size={13} /> Why this source?</summary>
       <div className="source-score-grid">
-        <span>BM25 score</span><strong>{formatScore(hit.source_scores.bm25)}</strong>
-        <span>Dense score</span><strong>{formatScore(hit.source_scores.dense)}</strong>
-        <span>Hybrid score</span><strong>{formatScore(hit.source_scores.fused ?? hit.score)}</strong>
-        <span>BM25 rank</span><strong>{hit.source_scores.bm25_rank ?? '—'}</strong>
-        <span>Dense rank</span><strong>{hit.source_scores.dense_rank ?? '—'}</strong>
+        {(retriever === 'bm25' || retriever === 'hybrid') && <>
+          <span>BM25 score</span><strong>{formatScore(hit.source_scores.bm25)}</strong>
+          <span>BM25 rank</span><strong>{hit.source_scores.bm25_rank ?? (retriever === 'bm25' ? hit.rank : '—')}</strong>
+        </>}
+        {(retriever === 'dense' || retriever === 'hybrid') && <>
+          <span>Dense score</span><strong>{formatScore(hit.source_scores.dense)}</strong>
+          <span>Dense rank</span><strong>{hit.source_scores.dense_rank ?? '—'}</strong>
+        </>}
+        {retriever === 'hybrid' && <>
+          <span>Hybrid score</span><strong>{formatScore(hit.source_scores.fused ?? hit.score)}</strong>
+        </>}
       </div>
     </details>
   );
 }
 
-function ResultCard({ hit, query }: { hit: Hit; query: string }) {
+function ResultCard({ hit, query, retriever }: { hit: Hit; query: string; retriever: Retriever }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await navigator.clipboard.writeText(hit.text);
@@ -89,7 +95,7 @@ function ResultCard({ hit, query }: { hit: Hit; query: string }) {
       <div className="result-card-bottom">
         <div className="result-meta"><FileText size={13} /> {hit.doc_id} <span>·</span> {hit.chunk_id}</div>
         <div className="result-actions">
-          <SourceScores hit={hit} />
+          <SourceScores hit={hit} retriever={retriever} />
           <button className="text-action" onClick={copy}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? 'Copied' : 'Copy excerpt'}</button>
           <Link className="text-action" to={`/documents/${encodeURIComponent(hit.doc_id)}`}>Open <ExternalLink size={13} /></Link>
         </div>
@@ -99,10 +105,17 @@ function ResultCard({ hit, query }: { hit: Hit; query: string }) {
 }
 
 export function SearchWorkspace() {
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health });
+  const availableEngines = engineOptions.filter((engine) =>
+    (health.data?.available_retrievers ?? ['bm25']).includes(engine.value),
+  );
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [mode, setMode] = useState<'search' | 'ask'>('search');
   const [retriever, setRetriever] = useState<Retriever>('bm25');
+  const selectedRetriever = availableEngines.some((engine) => engine.value === retriever)
+    ? retriever
+    : 'bm25';
   const [streamedAnswer, setStreamedAnswer] = useState('');
   const search = useMutation({
     mutationFn: ({ text, engine }: { text: string; engine: Retriever }) => api.search(text, engine),
@@ -119,10 +132,10 @@ export function SearchWorkspace() {
     if (!nextQuery.trim() || loading) return;
     setQuery(nextQuery);
     setSubmittedQuery(nextQuery.trim());
-    if (mode === 'search') search.mutate({ text: nextQuery.trim(), engine: retriever });
+    if (mode === 'search') search.mutate({ text: nextQuery.trim(), engine: selectedRetriever });
     else {
       setStreamedAnswer('');
-      answer.mutate({ text: nextQuery.trim(), engine: retriever });
+      answer.mutate({ text: nextQuery.trim(), engine: selectedRetriever });
     }
   };
 
@@ -158,8 +171,8 @@ export function SearchWorkspace() {
             onChange={(event) => setQuery(event.target.value)}
           />
           <label className="engine-picker"><span>ENGINE</span>
-            <select aria-label="Select retrieval engine" value={retriever} onChange={(event) => setRetriever(event.target.value as Retriever)}>
-              {engines.map((engine) => <option key={engine.value} value={engine.value}>{engine.label}</option>)}
+          <select aria-label="Select retrieval engine" value={selectedRetriever} onChange={(event) => setRetriever(event.target.value as Retriever)}>
+            {availableEngines.map((engine) => <option key={engine.value} value={engine.value}>{engine.label}</option>)}
             </select><ChevronDown size={14} />
           </label>
           <button className="search-submit" disabled={!query.trim() || loading} type="submit">
@@ -168,22 +181,23 @@ export function SearchWorkspace() {
           </button>
         </form>
         <div className="example-row"><span>TRY</span>{examples.map((example) => <button key={example} onClick={() => submit(undefined, example)}>{example}<ArrowUpRight size={12} /></button>)}</div>
-        <div className="engine-caption"><CircleHelp size={13} /> {engines.find((engine) => engine.value === retriever)?.detail}
-          <span className="engine-explainer">{retriever === 'hybrid' ? 'BM25 + Dense' : retriever === 'bm25' ? 'Term matching' : 'Semantic matching'}</span>
+        <div className="engine-caption"><CircleHelp size={13} /> {engineOptions.find((engine) => engine.value === selectedRetriever)?.detail}
+          <span className="engine-explainer">{selectedRetriever === 'hybrid' ? 'BM25 + Dense' : selectedRetriever === 'bm25' ? 'Term matching' : 'Semantic matching'}</span>
         </div>
+        {availableEngines.length < engineOptions.length && <p className="comparison-note">Dense and hybrid are disabled on this deployment to keep retrieval within its configured memory budget.</p>}
       </section>
 
       {search.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Search couldn’t be completed</strong><span>{search.error.message}</span></div></div>}
-      {answer.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Answer generation is unavailable</strong><span>{answer.error.message}. A reachable Ollama-compatible model endpoint must be configured before NyayaAI can generate answers.</span></div></div>}
+      {answer.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Answer generation is unavailable</strong><span>{answer.error.message}. Configure the selected {health.data?.generation_provider ?? 'AI'} provider in the API service before NyayaAI can generate answers.</span></div></div>}
       {answer.isPending && streamedAnswer && <section className="answer-streaming-panel" aria-live="polite"><span className="streaming-indicator"><LoaderCircle className="spin" size={14} /> ANSWER STREAMING</span><p>{streamedAnswer}<i className="streaming-caret" /></p><small>Checking passage citations when generation completes…</small></section>}
 
       {!submittedQuery && (
         <section className="welcome-grid">
           <div className="welcome-card welcome-primary">
             <span className="welcome-kicker"><Sparkles size={14} /> HOW IT WORKS</span>
-            <h2>One question.<br />Three ways to find the answer.</h2>
-            <p>Compare lexical precision, semantic context, and their hybrid — with every result traceable to its passage.</p>
-            <div className="retriever-strip"><span><i className="legend-dot dot-navy" /> BM25</span><span><i className="legend-dot dot-sage" /> Dense</span><span><i className="legend-dot dot-gold" /> Hybrid</span></div>
+            <h2>One question.<br />Evidence you can inspect.</h2>
+            <p>Search the licensed legal corpus and follow each result back to its source passage.</p>
+            <div className="retriever-strip">{availableEngines.map((engine) => <span key={engine.value}><i className={`legend-dot dot-${engine.value === 'bm25' ? 'navy' : engine.value === 'dense' ? 'sage' : 'gold'}`} /> {engine.label}</span>)}</div>
           </div>
           <div className="welcome-card trust-card"><div className="trust-icon"><ShieldCheck size={19} /></div><span className="welcome-kicker">BUILT FOR CAREFUL RESEARCH</span><h3>Evidence, not assumptions.</h3><p>Answers cite numbered passages. Missing or weak evidence is shown plainly instead of filled in.</p><Link to="/compare">Explore the retrieval methods <ArrowRight size={14} /></Link></div>
         </section>
@@ -199,11 +213,11 @@ export function SearchWorkspace() {
             {search.isPending && <div className="loading-card"><LoaderCircle className="spin" /> Searching the legal corpus…</div>}
             {searchResult && !searchResult.corpus_available && <div className="empty-corpus"><BookOpen size={20} /><div><strong>No legal documents are indexed</strong><p>For local development, add an authorized dataset under <code>data/raw/</code>, configure <code>configs/data.yaml</code>, and run <code>make ingest</code>. The hosted deployment includes the attributed AILA 2019 corpus.</p></div></div>}
             {searchResult?.corpus_available && !hits.length && <div className="empty-corpus"><Search size={20} /><div><strong>No passages matched this query</strong><p>Try a broader legal concept, a case name, or a statute section number.</p></div></div>}
-            {hits.map((hit) => <ResultCard key={hit.chunk_id} hit={hit} query={submittedQuery} />)}
+            {hits.map((hit) => <ResultCard key={hit.chunk_id} hit={hit} query={submittedQuery} retriever={selectedRetriever} />)}
           </div>
           <aside className="evidence-aside">
             <div className="evidence-heading"><span className="evidence-icon"><FileText size={16} /></span><div><strong>Evidence panel</strong><span>Source attribution</span></div><span className="live-dot" /></div>
-            <div className="evidence-summary"><span className="evidence-summary-label">ACTIVE RETRIEVER</span><strong>{engines.find((engine) => engine.value === retriever)?.label}</strong><p>{engines.find((engine) => engine.value === retriever)?.detail}</p></div>
+            <div className="evidence-summary"><span className="evidence-summary-label">ACTIVE RETRIEVER</span><strong>{engineOptions.find((engine) => engine.value === selectedRetriever)?.label}</strong><p>{engineOptions.find((engine) => engine.value === selectedRetriever)?.detail}</p></div>
             <div className="evidence-legend"><span><i className="legend-dot dot-navy" /> Lexical</span><span><i className="legend-dot dot-sage" /> Semantic</span></div>
             {hits.slice(0, 4).map((hit) => <a className="evidence-item" href={`#${encodeURIComponent(hit.chunk_id)}`} key={hit.chunk_id}><span className="evidence-rank">{String(hit.rank).padStart(2, '0')}</span><span><strong>{String(hit.metadata.citation ?? hit.doc_id)}</strong><small>{hit.chunk_id}</small></span><ArrowUpRight size={14} /></a>)}
             {!hits.length && <p className="evidence-empty">{search.isPending ? 'Gathering source passages…' : 'Run a search to see source passages and ranking scores.'}</p>}
@@ -222,7 +236,7 @@ export function SearchWorkspace() {
             <div className="answer-disclaimer"><ShieldAlert size={15} /><span>{qaResult.disclaimer}</span></div>
           </article>
           <aside className="answer-sources"><div className="evidence-heading"><span className="evidence-icon"><BookOpen size={16} /></span><div><strong>Passages used</strong><span>{qaResult.passages.length} cited sources</span></div></div>
-            {qaResult.passages.map((passage) => <article id={`passage-${passage.index}`} className="passage-card" key={passage.chunk_id}><div className="passage-meta"><span>[{passage.index}]</span><Link to={`/documents/${encodeURIComponent(passage.doc_id)}`}>{passage.doc_id} <ExternalLink size={12} /></Link></div><p>{passage.text}</p><div className="passage-scores"><span>BM25 {formatScore(passage.source_scores.bm25)}</span><span>Dense {formatScore(passage.source_scores.dense)}</span><span>Rank score {formatScore(passage.score)}</span></div></article>)}
+            {qaResult.passages.map((passage) => <article id={`passage-${passage.index}`} className="passage-card" key={passage.chunk_id}><div className="passage-meta"><span>[{passage.index}]</span><Link to={`/documents/${encodeURIComponent(passage.doc_id)}`}>{passage.doc_id} <ExternalLink size={12} /></Link></div><p>{passage.text}</p><div className="passage-scores"><span>{selectedRetriever.toUpperCase()} {formatScore(passage.score)}</span><span>Rank {passage.index}</span></div></article>)}
           </aside>
         </section>
       )}

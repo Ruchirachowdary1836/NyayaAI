@@ -88,7 +88,7 @@ async def answer(payload: QARequest, request: Request) -> QAResponse:
 async def stream_answer(
     request: Request,
     query: str = Query(min_length=1, max_length=4000),
-    retriever: str = Query(default="hybrid", pattern="^(bm25|dense|hybrid)$"),
+    retriever: str = Query(default="bm25", pattern="^(bm25|dense|hybrid)$"),
     k: int = Query(default=10, ge=1, le=100),
     query_type: str = Query(
         default="auto", pattern="^(auto|statute_lookup|conceptual|fact_pattern)$"

@@ -24,6 +24,7 @@ def compare(payload: SearchRequest, request: Request) -> CompareResponse:
             else 0.0
         )
         for left, right in (("bm25", "dense"), ("bm25", "hybrid"), ("dense", "hybrid"))
+        if left in id_sets and right in id_sets
     }
     return CompareResponse(
         query=payload.query,

@@ -72,6 +72,7 @@ def test_search_qa_document_feedback_and_request_id(tmp_path: Path) -> None:
         ready = client.get("/ready")
         assert ready.json()["corpus_documents"] == 1
         assert ready.json()["corpus_chunks"] == 1
+        assert ready.json()["available_retrievers"] == ["bm25", "dense", "hybrid"]
 
 
 def test_compare_has_overlap_statistics(tmp_path: Path) -> None:
@@ -89,6 +90,26 @@ def test_compare_has_overlap_statistics(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()["results"] == {"bm25": [], "dense": [], "hybrid": []}
     assert all(value == 0 for value in response.json()["overlap"].values())
+
+
+def test_disabled_search_engines_fail_without_loading_models() -> None:
+    with TestClient(app) as client:
+        _wait_until_ready(client)
+        app.state.retrievers = RetrieverRegistry([], enabled_retrievers=["bm25"])
+        dense = client.post(
+            "/api/v1/search",
+            json={"query": "Section 482 CrPC", "retriever": "dense"},
+        )
+        comparison = client.post(
+            "/api/v1/compare",
+            json={"query": "Section 482 CrPC"},
+        )
+
+    assert dense.status_code == 503
+    assert "disabled by deployment configuration" in dense.json()["detail"]
+    assert comparison.status_code == 200
+    assert comparison.json()["results"] == {"bm25": []}
+    assert comparison.json()["overlap"] == {}
 
 
 def test_registration_login_and_admin_role_enforcement(tmp_path: Path) -> None:

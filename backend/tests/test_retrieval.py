@@ -159,6 +159,22 @@ def test_registry_loads_bm25_without_eagerly_loading_dense_model() -> None:
     assert registry.available == ["bm25", "dense", "hybrid"]
 
 
+def test_registry_disables_unconfigured_retrievers_before_model_loading(monkeypatch) -> None:
+    from backend.app.services.retrieval import registry as registry_module
+
+    def fail_if_loaded(*args, **kwargs):
+        raise AssertionError("Disabled dense model must not be loaded")
+
+    monkeypatch.setattr(registry_module, "DenseRetriever", fail_if_loaded)
+    registry = RetrieverRegistry([], enabled_retrievers=["bm25"])
+
+    assert registry.available == ["bm25"]
+    with pytest.raises(RuntimeError, match="Dense retrieval is disabled"):
+        registry.get("dense")
+    with pytest.raises(RuntimeError, match="Hybrid retrieval is disabled"):
+        registry.get("hybrid")
+
+
 def test_registry_initializes_dense_engine_once_for_concurrent_requests(monkeypatch) -> None:
     from backend.app.services.retrieval import registry as registry_module
 

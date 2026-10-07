@@ -36,6 +36,7 @@ def _initialize_runtime(application: FastAPI) -> None:
     retrievers = RetrieverRegistry(
         chunks,
         embedding_model=settings.embedding_model,
+        enabled_retrievers=settings.enabled_retrievers,
     )
     database = Database(settings.database_url)
     try:
@@ -181,7 +182,7 @@ def health() -> dict[str, str]:
 
 
 @app.get("/ready", tags=["health"], response_model=None)
-def ready(request: Request) -> dict[str, str | int | bool] | JSONResponse:
+def ready(request: Request) -> dict[str, str | int | bool | list[str]] | JSONResponse:
     initialization_status = getattr(request.app.state, "initialization_status", "initializing")
     if initialization_status != "ready":
         return JSONResponse(
@@ -194,6 +195,7 @@ def ready(request: Request) -> dict[str, str | int | bool] | JSONResponse:
                 "corpus_chunks": 0,
                 "generation_configured": getattr(request.app.state.generator, "configured", True),
                 "generation_provider": settings.generator_provider,
+                "available_retrievers": settings.enabled_retrievers,
             },
         )
     registry: RetrieverRegistry = app.state.retrievers
@@ -204,4 +206,5 @@ def ready(request: Request) -> dict[str, str | int | bool] | JSONResponse:
         "corpus_chunks": registry.corpus_size,
         "generation_configured": generator.configured if hasattr(generator, "configured") else True,
         "generation_provider": settings.generator_provider,
+        "available_retrievers": registry.available,
     }

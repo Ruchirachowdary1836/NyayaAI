@@ -12,6 +12,10 @@ vi.mock('../lib/api', async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
+      health: vi.fn().mockResolvedValue({
+        status: 'ready',
+        available_retrievers: ['bm25'],
+      }),
       search: vi.fn(),
       answer: vi.fn(),
       streamAnswer: vi.fn(),

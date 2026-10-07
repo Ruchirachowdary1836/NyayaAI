@@ -65,29 +65,36 @@ function CompareColumn({ name, hits, baseline }: { name: Retriever; hits: Hit[];
 
 export function ComparePage() {
   const [query, setQuery] = useState('');
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health });
   const compare = useMutation({ mutationFn: (text: string) => api.compare(text, 6) });
   const submit = (event: FormEvent) => { event.preventDefault(); if (query.trim()) compare.mutate(query.trim()); };
   const result = compare.data;
-  const baseline = new Set(result?.results.bm25.map((hit) => hit.doc_id) ?? []);
+  const availableEngines = ENGINE_NAMES.filter((engine) =>
+    (health.data?.available_retrievers ?? ['bm25']).includes(engine),
+  );
+  const baseline = new Set(result?.results.bm25?.map((hit) => hit.doc_id) ?? []);
   return (
     <div className="subpage">
-      <PageTitle eyebrow="CONTROLLED COMPARISON" title="Three retrieval lenses." description="Run one query through BM25, dense semantic search, and hybrid fusion. The corpus and query stay fixed; only the retriever changes." />
-      <form className="compare-query-form" onSubmit={submit}><Search size={18} /><input aria-label="Comparison query" placeholder="Enter a legal query to compare retrieval engines…" value={query} onChange={(event) => setQuery(event.target.value)} /><button className="primary-button" disabled={!query.trim() || compare.isPending}>{compare.isPending ? <LoaderCircle className="spin" size={16} /> : null} Compare engines <ArrowRight size={15} /></button></form>
-      {compare.isError && <ErrorState message={compare.error.message} />}
-      {!result && !compare.isPending && <div className="empty-state-card"><Layers3 size={23} /><h2>Same question. Side-by-side evidence.</h2><p>See which passages each method surfaces, inspect rank shifts, and compare the overlap between retrieval strategies.</p></div>}
-      {compare.isPending && <div className="loading-card"><LoaderCircle className="spin" /> Running all three retrieval methods…</div>}
-      {result && <CompareResults result={result} baseline={baseline} />}
+      <PageTitle eyebrow="CONTROLLED COMPARISON" title={availableEngines.length > 1 ? 'Compare retrieval methods.' : 'Comparison needs multiple engines.'} description={availableEngines.length > 1 ? 'Run one query through the enabled retrieval methods. The corpus and query stay fixed; only the retriever changes.' : 'This deployment has BM25 enabled. Dense and hybrid retrieval are disabled because their model and index exceed the configured API memory budget.'} />
+      {availableEngines.length > 1 && <>
+        <form className="compare-query-form" onSubmit={submit}><Search size={18} /><input aria-label="Comparison query" placeholder="Enter a legal query to compare retrieval engines…" value={query} onChange={(event) => setQuery(event.target.value)} /><button className="primary-button" disabled={!query.trim() || compare.isPending}>{compare.isPending ? <LoaderCircle className="spin" size={16} /> : null} Compare engines <ArrowRight size={15} /></button></form>
+        {compare.isError && <ErrorState message={compare.error.message} />}
+        {!result && !compare.isPending && <div className="empty-state-card"><Layers3 size={23} /><h2>Same question. Side-by-side evidence.</h2><p>See which passages each method surfaces, inspect rank shifts, and compare the overlap between retrieval strategies.</p></div>}
+        {compare.isPending && <div className="loading-card"><LoaderCircle className="spin" /> Running enabled retrieval methods…</div>}
+        {result && <CompareResults result={result} baseline={baseline} />}
+      </>}
     </div>
   );
 }
 
 function CompareResults({ result, baseline }: { result: CompareResponse; baseline: Set<string> }) {
   const overlapEntries = Object.entries(result.overlap);
+  const engines = ENGINE_NAMES.filter((engine) => result.results[engine] !== undefined);
   return (
     <>
       <div className="compare-query-label"><span className="section-kicker">QUERY UNDER TEST</span><strong>“{result.query}”</strong></div>
       <div className="overlap-strip"><div className="overlap-title"><Layers3 size={16} /><span>Result-set overlap</span></div>{overlapEntries.map(([pair, score]) => <div className="overlap-stat" key={pair}><span>{pair.replace('-', ' / ').toUpperCase()}</span><strong>{Math.round(score * 100)}%</strong><div className="overlap-track"><i style={{ width: `${score * 100}%` }} /></div></div>)}</div>
-      <div className="compare-columns">{ENGINE_NAMES.map((name) => <CompareColumn key={name} name={name} hits={result.results[name]} baseline={baseline} />)}</div>
+      <div className="compare-columns">{engines.map((name) => <CompareColumn key={name} name={name} hits={result.results[name] ?? []} baseline={baseline} />)}</div>
       <p className="comparison-note"><ShieldCheck size={14} /> The hybrid column marks documents absent from the BM25 baseline. Document-level overlap is calculated from the top six hits.</p>
     </>
   );

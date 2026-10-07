@@ -46,8 +46,18 @@ export interface QAResponse {
 
 export interface CompareResponse {
   query: string;
-  results: Record<Retriever, Hit[]>;
+  results: Partial<Record<Retriever, Hit[]>>;
   overlap: Record<string, number>;
+}
+
+export interface APIHealth {
+  status: string;
+  detail?: string;
+  corpus_documents?: number;
+  corpus_chunks?: number;
+  generation_configured?: boolean;
+  generation_provider?: string;
+  available_retrievers?: Retriever[];
 }
 
 export interface ExperimentRun {
@@ -116,14 +126,7 @@ async function request<T>(path: string, init?: RequestInit, token?: string): Pro
 export const api = {
   health: async () => {
     const response = await fetchApi(`${API_BASE}/ready`);
-    const health = (await response.json()) as {
-      status: string;
-      detail?: string;
-      corpus_documents?: number;
-      corpus_chunks?: number;
-      generation_configured?: boolean;
-      generation_provider?: string;
-    };
+    const health = (await response.json()) as APIHealth;
     if (!response.ok && health.status !== 'initializing') {
       throw new Error(health.detail ?? `Health check failed (${response.status})`);
     }
