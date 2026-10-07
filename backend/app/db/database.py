@@ -44,8 +44,17 @@ feedback = Table(
 )
 
 
+def _normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgres://")
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    return url
+
+
 class Database:
     def __init__(self, url: str) -> None:
+        url = _normalize_database_url(url)
         if url.startswith("sqlite:///"):
             database_file = Path(url.removeprefix("sqlite:///"))
             database_file.parent.mkdir(parents=True, exist_ok=True)
