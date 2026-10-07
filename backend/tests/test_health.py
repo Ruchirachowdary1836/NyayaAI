@@ -1,7 +1,12 @@
 import time
 
+from backend.app.core.config import Settings
 from backend.app.main import app
 from fastapi.testclient import TestClient
+
+
+def test_default_retriever_configuration_is_safe() -> None:
+    assert Settings(_env_file=None).enabled_retrievers == ["bm25"]
 
 
 def test_health_endpoint() -> None:

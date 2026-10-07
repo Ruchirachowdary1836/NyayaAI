@@ -30,7 +30,8 @@ def test_search_qa_document_feedback_and_request_id(tmp_path: Path) -> None:
         _wait_until_ready(client)
         text = "Section 482 CrPC permits the High Court to exercise inherent powers."
         app.state.retrievers = RetrieverRegistry(
-            [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))]
+            [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))],
+            enabled_retrievers=["bm25"],
         )
         app.state.documents_path = tmp_path / "documents.jsonl"
         app.state.documents_path.write_text(
@@ -72,7 +73,7 @@ def test_search_qa_document_feedback_and_request_id(tmp_path: Path) -> None:
         ready = client.get("/ready")
         assert ready.json()["corpus_documents"] == 1
         assert ready.json()["corpus_chunks"] == 1
-        assert ready.json()["available_retrievers"] == ["bm25", "dense", "hybrid"]
+        assert ready.json()["available_retrievers"] == ["bm25"]
 
 
 def test_compare_has_overlap_statistics(tmp_path: Path) -> None:

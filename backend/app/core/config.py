@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     generator_api_base_url: str = "https://api.openai.com/v1"
     generator_model: str = "llama3.1:8b"
     embedding_model: str = "BAAI/bge-m3"
-    enabled_retrievers: list[str] = ["bm25", "dense", "hybrid"]
+    enabled_retrievers: list[str] = ["bm25"]
     data_chunks_path: str = "data/processed/chunks.jsonl"
     data_documents_path: str = "data/processed/documents.jsonl"
     results_dir: str = "evaluation/results"
