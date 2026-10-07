@@ -74,13 +74,14 @@ def test_deduplicate_documents_removes_repeated_text() -> None:
 
 def test_chunking_preserves_offsets_parent_ids_and_overlap() -> None:
     text = "one two three four five six seven eight nine ten"
-    document = LegalDocument("case-1", text, "aila")
+    document = LegalDocument("case-1", text, "aila", {"license": "CC BY 4.0"})
     chunks = chunk_document(document, chunk_size=4, overlap=0.25)
 
     assert chunks[0].text == "one two three four"
     assert chunks[0].start_char == 0
     assert text[chunks[1].start_char : chunks[1].end_char] == chunks[1].text
     assert chunks[1].doc_id == "case-1"
+    assert chunks[0].metadata == {"license": "CC BY 4.0"}
     assert chunks[1].text.startswith("four")
     assert all(chunk.token_count <= 4 for chunk in chunks)
 

@@ -91,6 +91,7 @@ class DenseRetriever:
                 score=score,
                 rank=rank,
                 source_scores={"dense": score},
+                metadata=self.chunks[index].metadata,
             )
             for rank, (index, score) in enumerate(ranked, start=1)
         ]

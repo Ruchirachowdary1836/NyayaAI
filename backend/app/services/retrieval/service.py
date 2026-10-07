@@ -26,6 +26,7 @@ def load_chunks(path: str | Path = "data/processed/chunks.jsonl") -> list[LegalC
                         start_char=int(record["start_char"]),
                         end_char=int(record["end_char"]),
                         token_count=int(record["token_count"]),
+                        metadata=record.get("metadata", {}),
                     )
                 )
             except (KeyError, TypeError, ValueError) as error:

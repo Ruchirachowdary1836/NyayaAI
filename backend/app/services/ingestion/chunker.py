@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from backend.app.services.ingestion.loaders import LegalDocument
 
@@ -17,6 +17,7 @@ class LegalChunk:
     start_char: int
     end_char: int
     token_count: int
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 def chunk_document(
@@ -55,6 +56,7 @@ def chunk_document(
                 start_char=tokens[start].start(),
                 end_char=tokens[end - 1].end(),
                 token_count=end - start,
+                metadata=document.metadata,
             )
         )
         if end == len(tokens):

@@ -2,7 +2,9 @@
 
 This directory is reserved for the legal corpus, processed chunks, and index artifacts.
 
-The raw sources are intentionally not stored in git. Each dataset should be fetched and transformed with reproducible scripts in later phases of the project.
+The raw sources are intentionally not stored in git. Fetch each corpus through its documented source and preserve its license and attribution.
+
+The Render API image downloads the AILA 2019 corpus from Zenodo, checks the published archive checksum, and ingests its case and statute documents during the Docker build. The archive is CC BY 4.0; see [`../docs/DATA_SOURCES.md`](../docs/DATA_SOURCES.md) for attribution and limits. This build-time corpus is separate from locally mounted `data/` directories.
 
 ## Supported ingestion inputs
 

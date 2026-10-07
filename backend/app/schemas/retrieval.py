@@ -9,7 +9,7 @@ RetrieverName = Literal["bm25", "dense", "hybrid"]
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
-    retriever: RetrieverName = "hybrid"
+    retriever: RetrieverName = "bm25"
     k: int = Field(default=10, ge=1, le=100)
 
 
@@ -31,7 +31,7 @@ class SearchResponse(BaseModel):
 
 
 class QARequest(SearchRequest):
-    retriever: RetrieverName = "hybrid"
+    retriever: RetrieverName = "bm25"
     query_type: Literal["auto", "statute_lookup", "conceptual", "fact_pattern"] = "auto"
 
 

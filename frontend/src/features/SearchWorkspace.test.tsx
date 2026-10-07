@@ -55,11 +55,15 @@ describe('research workspace', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Search$/ }));
 
-    await waitFor(() => expect(api.search).toHaveBeenCalledWith('Section 482 CrPC', 'hybrid'));
+    await waitFor(() => expect(api.search).toHaveBeenCalledWith('Section 482 CrPC', 'bm25'));
     await waitFor(() =>
       expect(container.querySelector('.result-excerpt')).toHaveTextContent('Section 482 CrPC passage.'),
     );
     expect(screen.getByText('Supreme Court')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'AILA 2019 cases and statutes' })).toHaveAttribute(
+      'href',
+      'https://doi.org/10.5281/zenodo.4063986',
+    );
   });
 
   it('switches to grounded answer mode and displays its disclaimer', async () => {
@@ -86,7 +90,7 @@ describe('research workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /Ask NyayaAI/ }));
 
     await waitFor(() =>
-      expect(api.streamAnswer).toHaveBeenCalledWith('legal query', 'hybrid', expect.any(Function)),
+      expect(api.streamAnswer).toHaveBeenCalledWith('legal query', 'bm25', expect.any(Function)),
     );
     await waitFor(() =>
       expect(container.querySelector('.answer-text')).toHaveTextContent('A supported statement'),

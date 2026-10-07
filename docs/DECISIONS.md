@@ -28,7 +28,7 @@ This document captures the default choices made during Phase 0 and later phases 
 
 ## Full-stack decisions
 
-1. BM25 uses rank-bm25 Okapi scoring and preserves matching chunks when small-corpus IDF scores are zero.
+1. BM25 uses Okapi scoring with a compact postings index to avoid retaining duplicate tokenized corpora in memory; matching chunks remain eligible when small-corpus IDF scores are zero.
 2. Dense retrieval normalizes embeddings, prefers an exact FAISS inner-product index, and falls back to exact NumPy cosine search when FAISS is unavailable.
 3. Hybrid retrieval uses deterministic RRF or weighted score fusion; evaluation conditions keep retriever configuration fixed.
 4. Docker Compose uses PostgreSQL for auth and feedback; direct local development and tests default to file-backed SQLite.

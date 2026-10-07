@@ -102,7 +102,7 @@ export function SearchWorkspace() {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
   const [mode, setMode] = useState<'search' | 'ask'>('search');
-  const [retriever, setRetriever] = useState<Retriever>('hybrid');
+  const [retriever, setRetriever] = useState<Retriever>('bm25');
   const [streamedAnswer, setStreamedAnswer] = useState('');
   const search = useMutation({
     mutationFn: ({ text, engine }: { text: string; engine: Retriever }) => api.search(text, engine),
@@ -137,6 +137,8 @@ export function SearchWorkspace() {
           <div className="eyebrow"><span className="eyebrow-line" /> Indian case law · Research workspace</div>
           <h1>Find the law.<br /><em>Follow the evidence.</em></h1>
           <p className="heading-description">Search precedents and statutes, or ask a question grounded in source passages.</p>
+          <p className="corpus-attribution">Corpus: <a href="https://doi.org/10.5281/zenodo.4063986" target="_blank" rel="noreferrer">AILA 2019 cases and statutes</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a> · BM25 works without a hosted language model.</p>
+          <details className="corpus-attribution-details"><summary>Dataset attribution</summary><p>AILA 2019 Precedent &amp; Statute Retrieval Task by Paheli Bhattacharya, Kripabandhu Ghosh, Saptarshi Ghosh, Arindam Pal, Parth Mehta, Arnab Bhattacharya, and Prasenjit Majumder. <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. The documents are normalized, cleaned, and chunked for retrieval.</p></details>
         </div>
         <div className="heading-metric"><span className="metric-orbit"><Scale size={21} /></span><span>Research built on<br /><strong>transparent evidence</strong></span></div>
       </div>
@@ -172,7 +174,7 @@ export function SearchWorkspace() {
       </section>
 
       {search.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Search couldn’t be completed</strong><span>{search.error.message}</span></div></div>}
-      {answer.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Answer generation is unavailable</strong><span>{answer.error.message}. The local model must be running before NyayaAI can generate answers.</span></div></div>}
+      {answer.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Answer generation is unavailable</strong><span>{answer.error.message}. A reachable Ollama-compatible model endpoint must be configured before NyayaAI can generate answers.</span></div></div>}
       {answer.isPending && streamedAnswer && <section className="answer-streaming-panel" aria-live="polite"><span className="streaming-indicator"><LoaderCircle className="spin" size={14} /> ANSWER STREAMING</span><p>{streamedAnswer}<i className="streaming-caret" /></p><small>Checking passage citations when generation completes…</small></section>}
 
       {!submittedQuery && (
@@ -195,7 +197,7 @@ export function SearchWorkspace() {
               {searchResult && <span className="result-count">{searchResult.hits.length} passages</span>}
             </div>
             {search.isPending && <div className="loading-card"><LoaderCircle className="spin" /> Searching the legal corpus…</div>}
-            {searchResult && !searchResult.corpus_available && <div className="empty-corpus"><BookOpen size={20} /><div><strong>Your corpus is ready to be connected</strong><p>No legal documents are indexed yet. Add an authorized dataset under <code>data/raw/</code>, configure <code>configs/data.yaml</code>, and run <code>make ingest</code>.</p></div></div>}
+            {searchResult && !searchResult.corpus_available && <div className="empty-corpus"><BookOpen size={20} /><div><strong>No legal documents are indexed</strong><p>For local development, add an authorized dataset under <code>data/raw/</code>, configure <code>configs/data.yaml</code>, and run <code>make ingest</code>. The hosted deployment includes the attributed AILA 2019 corpus.</p></div></div>}
             {searchResult?.corpus_available && !hits.length && <div className="empty-corpus"><Search size={20} /><div><strong>No passages matched this query</strong><p>Try a broader legal concept, a case name, or a statute section number.</p></div></div>}
             {hits.map((hit) => <ResultCard key={hit.chunk_id} hit={hit} query={submittedQuery} />)}
           </div>

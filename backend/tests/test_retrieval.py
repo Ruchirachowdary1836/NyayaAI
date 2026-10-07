@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 from backend.app.services.ingestion.chunker import LegalChunk
@@ -8,6 +10,7 @@ from backend.app.services.retrieval.bm25 import BM25Retriever
 from backend.app.services.retrieval.dense import DenseRetriever
 from backend.app.services.retrieval.hybrid import HybridRetriever
 from backend.app.services.retrieval.registry import RetrieverRegistry
+from backend.app.services.retrieval.service import load_chunks
 
 
 def chunk(doc_id: str, text: str) -> LegalChunk:
@@ -59,6 +62,38 @@ def test_bm25_retrieves_matching_legal_provision_and_validates_k() -> None:
     assert results[0].source_scores["bm25"] == results[0].score
     with pytest.raises(ValueError, match="k"):
         retriever.search("Section 482", k=0)
+
+
+def test_bm25_preserves_source_metadata_and_chunk_loader_round_trips(tmp_path) -> None:
+    metadata = {
+        "document_type": "statute",
+        "title": "Example Act",
+        "license": "CC BY 4.0",
+    }
+    text = "Example statute provision."
+    original_chunk = LegalChunk("S1", "S1:0", text, 0, len(text), 3, metadata)
+    chunk_path = tmp_path / "chunks.jsonl"
+    chunk_path.write_text(
+        json.dumps(
+            {
+                "doc_id": original_chunk.doc_id,
+                "chunk_id": original_chunk.chunk_id,
+                "text": original_chunk.text,
+                "start_char": original_chunk.start_char,
+                "end_char": original_chunk.end_char,
+                "token_count": original_chunk.token_count,
+                "metadata": original_chunk.metadata,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded_chunk = load_chunks(chunk_path)[0]
+    result = BM25Retriever([loaded_chunk]).search("statute provision")[0]
+
+    assert loaded_chunk.metadata == metadata
+    assert result.metadata == metadata
 
 
 def test_dense_retrieval_with_injected_encoder() -> None:

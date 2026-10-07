@@ -32,7 +32,9 @@ The application starts with an empty index. Search and comparison return honest 
 
 The repository includes [`render.yaml`](render.yaml) as a Render Blueprint. In Render, choose **New + → Blueprint**, connect this repository, and deploy the `main` branch. The Blueprint creates a static frontend, Docker-based API, and PostgreSQL database. Set `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD` when prompted; `JWT_SECRET_KEY` is generated automatically.
 
-The Blueprint uses Render's free plans to avoid automatic charges. Free web services can spin down when idle, and free PostgreSQL has limited lifetime/storage; choose an appropriate paid plan for persistent production use. The hosted app starts with an empty legal corpus, and grounded QA requires a separately hosted Ollama-compatible endpoint/model. Do not deploy restricted legal data without authorization.
+The API image fetches and indexes the AILA 2019 precedent-and-statute corpus at build time, verifying the Zenodo archive checksum. The source dataset is CC BY 4.0; see [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) for attribution and limitations. BM25 is the default search engine and needs no language model. Dense/hybrid retrieval downloads the configured embedding model on first use and may exceed free-instance memory. Grounded QA requires a separately hosted Ollama-compatible endpoint/model; the Render Blueprint does not provision one.
+
+The Blueprint uses Render's free plans where supported to avoid automatic charges. Free web services can spin down when idle, and free PostgreSQL has limited lifetime/storage; choose an appropriate paid plan for persistent production use. The AILA archive is fetched during image builds and the resulting index is included in the API image, so it does not depend on an ephemeral service disk. Do not add restricted legal data without authorization.
 
 ## Ingest authorized data
 

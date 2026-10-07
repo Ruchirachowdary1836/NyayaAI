@@ -1,0 +1,18 @@
+corpus:
+  source: aila
+  input_path: data/raw/aila_corpus.jsonl
+  queries_path:
+  qrels_path:
+  chunk_size: 512
+  overlap: 0.15
+  deduplicate_near_duplicates: false
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  index_dir: data/indices
+  statistics_path: data/processed/corpus_statistics.json
+
+logging:
+  level: INFO
+  seed: 42
