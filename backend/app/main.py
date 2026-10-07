@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -13,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.app.api.v1 import admin, auth, compare, documents, experiments, feedback, qa, search
-from backend.app.api.v1.feedback import initialize_feedback_store
 from backend.app.core.config import settings
 from backend.app.core.logging import configure_logging
 from backend.app.db.database import Database
@@ -26,13 +26,47 @@ configure_logging()
 logger = logging.getLogger("nyayaai.api")
 
 
-@asynccontextmanager
-async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+def _initialize_runtime(application: FastAPI) -> None:
     chunks = load_chunks(settings.data_chunks_path)
-    application.state.retrievers = RetrieverRegistry(
+    retrievers = RetrieverRegistry(
         chunks,
         embedding_model=settings.embedding_model,
     )
+    database = Database(settings.database_url)
+    try:
+        initialize_auth_store(database)
+    except Exception:
+        database.close()
+        raise
+
+    application.state.retrievers = retrievers
+    application.state.database = database
+    application.state.feedback_db = database
+    application.state.auth_db = database
+
+
+async def _initialize_runtime_in_background(application: FastAPI) -> None:
+    try:
+        await asyncio.to_thread(_initialize_runtime, application)
+    except Exception:
+        application.state.initialization_status = "failed"
+        application.state.initialization_error = (
+            "NyayaAI initialization failed. Check the API service logs for details."
+        )
+        logger.exception("Application initialization failed")
+    else:
+        application.state.initialization_status = "ready"
+        logger.info("Application initialization completed")
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    application.state.initialization_status = "initializing"
+    application.state.initialization_error = None
+    application.state.retrievers = None
+    application.state.database = None
+    application.state.feedback_db = None
+    application.state.auth_db = None
     application.state.generator = build_generator(
         provider=settings.generator_provider,
         api_key=settings.generator_api_key,
@@ -42,13 +76,16 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     )
     application.state.documents_path = Path(settings.data_documents_path)
     application.state.results_dir = Path(settings.results_dir)
-    application.state.database = Database(settings.database_url)
-    application.state.feedback_db = application.state.database
-    application.state.auth_db = application.state.database
-    initialize_feedback_store(application.state.database)
-    initialize_auth_store(application.state.database)
-    yield
-    application.state.database.close()
+    initialization_task = asyncio.create_task(_initialize_runtime_in_background(application))
+    try:
+        yield
+    finally:
+        if not initialization_task.done():
+            initialization_task.cancel()
+            await asyncio.gather(initialization_task, return_exceptions=True)
+        database = application.state.database
+        if database is not None:
+            database.close()
 
 
 app = FastAPI(
@@ -72,6 +109,25 @@ _requests: dict[str, deque[float]] = defaultdict(deque)
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    if request.method != "OPTIONS" and request.url.path not in {
+        "/health",
+        "/ready",
+        "/openapi.json",
+        "/docs",
+        "/redoc",
+    }:
+        initialization_status = getattr(request.app.state, "initialization_status", "initializing")
+        if initialization_status != "ready":
+            detail = (
+                request.app.state.initialization_error
+                if initialization_status == "failed"
+                else "NyayaAI is initializing its corpus index and database. Retry shortly."
+            )
+            return JSONResponse(
+                status_code=503,
+                content={"detail": detail, "status": initialization_status},
+                headers={"X-Request-ID": request_id, "Retry-After": "5"},
+            )
     client_ip = request.client.host if request.client else "unknown"
     now = time.monotonic()
     recent = _requests[client_ip]
@@ -119,8 +175,22 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/ready", tags=["health"])
-def ready() -> dict[str, str | int]:
+@app.get("/ready", tags=["health"], response_model=None)
+def ready(request: Request) -> dict[str, str | int | bool] | JSONResponse:
+    initialization_status = getattr(request.app.state, "initialization_status", "initializing")
+    if initialization_status != "ready":
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": initialization_status,
+                "detail": getattr(request.app.state, "initialization_error", None)
+                or "NyayaAI is initializing its corpus index and database. Retry shortly.",
+                "corpus_documents": 0,
+                "corpus_chunks": 0,
+                "generation_configured": getattr(request.app.state.generator, "configured", True),
+                "generation_provider": settings.generator_provider,
+            },
+        )
     registry: RetrieverRegistry = app.state.retrievers
     generator = app.state.generator
     return {

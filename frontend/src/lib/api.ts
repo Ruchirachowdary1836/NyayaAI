@@ -102,14 +102,21 @@ async function request<T>(path: string, init?: RequestInit, token?: string): Pro
 }
 
 export const api = {
-  health: () =>
-    request<{
+  health: async () => {
+    const response = await fetchApi(`${API_BASE}/ready`);
+    const health = (await response.json()) as {
       status: string;
+      detail?: string;
       corpus_documents?: number;
       corpus_chunks?: number;
       generation_configured?: boolean;
       generation_provider?: string;
-    }>('/ready'),
+    };
+    if (!response.ok && health.status !== 'initializing') {
+      throw new Error(health.detail ?? `Health check failed (${response.status})`);
+    }
+    return health;
+  },
   search: (query: string, retriever: Retriever, k = 10) =>
     request<SearchResponse>('/api/v1/search', {
       method: 'POST',

@@ -213,7 +213,13 @@ export function AdminPage() {
     queryFn: () => api.adminUsers(token),
     enabled: Boolean(token) && overview.isSuccess,
   });
-  const status = health.isError ? 'Unavailable' : health.isLoading ? 'Checking' : 'Operational';
+  const status = health.isError
+    ? 'Unavailable'
+    : health.isLoading
+      ? 'Checking'
+      : health.data?.status === 'initializing'
+        ? 'Starting'
+        : 'Operational';
   const logout = () => {
     localStorage.removeItem('nyayaai-token');
     setToken('');

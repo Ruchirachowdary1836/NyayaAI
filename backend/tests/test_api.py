@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from backend.app.api.v1.feedback import initialize_feedback_store
@@ -12,8 +13,20 @@ from backend.app.services.retrieval.registry import RetrieverRegistry
 from fastapi.testclient import TestClient
 
 
+def _wait_until_ready(client: TestClient) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        response = client.get("/ready")
+        if response.status_code == 200:
+            return
+        assert response.status_code == 503, response.text
+        time.sleep(0.01)
+    raise AssertionError("Application did not become ready within 10 seconds")
+
+
 def test_search_qa_document_feedback_and_request_id(tmp_path: Path) -> None:
     with TestClient(app) as client:
+        _wait_until_ready(client)
         text = "Section 482 CrPC permits the High Court to exercise inherent powers."
         app.state.retrievers = RetrieverRegistry(
             [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))]
@@ -62,6 +75,7 @@ def test_search_qa_document_feedback_and_request_id(tmp_path: Path) -> None:
 
 def test_compare_has_overlap_statistics(tmp_path: Path) -> None:
     with TestClient(app) as client:
+        _wait_until_ready(client)
         app.state.retrievers = RetrieverRegistry([])
         app.state.documents_path = tmp_path / "documents.jsonl"
         app.state.feedback_db = tmp_path / "feedback.db"
@@ -78,6 +92,7 @@ def test_compare_has_overlap_statistics(tmp_path: Path) -> None:
 
 def test_registration_login_and_admin_role_enforcement(tmp_path: Path) -> None:
     with TestClient(app) as client:
+        _wait_until_ready(client)
         auth_path = tmp_path / "auth.db"
         initialize_auth_store(auth_path)
         app.state.auth_db = auth_path
@@ -113,6 +128,7 @@ def test_registration_login_and_admin_role_enforcement(tmp_path: Path) -> None:
 
 def test_user_can_edit_profile_and_old_token_is_revoked(tmp_path: Path) -> None:
     with TestClient(app) as client:
+        _wait_until_ready(client)
         auth_path = tmp_path / "profile.db"
         initialize_auth_store(auth_path)
         app.state.auth_db = auth_path
@@ -161,6 +177,7 @@ def test_qa_stream_emits_tokens_and_audited_completion(tmp_path: Path) -> None:
             yield "[1]."
 
     with TestClient(app) as client:
+        _wait_until_ready(client)
         text = "Section 482 CrPC permits the High Court to exercise inherent powers."
         app.state.retrievers = RetrieverRegistry(
             [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))]
@@ -182,6 +199,7 @@ def test_qa_does_not_fabricate_answer_when_provider_key_is_missing() -> None:
     from backend.app.services.generation.llm import OpenAICompatibleGenerator
 
     with TestClient(app) as client:
+        _wait_until_ready(client)
         text = "Section 482 CrPC permits the High Court to exercise inherent powers."
         app.state.retrievers = RetrieverRegistry(
             [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))]
@@ -198,3 +216,72 @@ def test_qa_does_not_fabricate_answer_when_provider_key_is_missing() -> None:
     assert response.json()["detail"] == (
         "AI answer generation is not configured. Set GENERATOR_API_KEY in the API service."
     )
+
+
+def test_liveness_is_available_while_runtime_initializes(monkeypatch) -> None:
+    import threading
+
+    from backend.app import main
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_initialize(application) -> None:
+        started.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("Test initialization was not released")
+        application.state.retrievers = RetrieverRegistry([])
+        application.state.initialization_status = "ready"
+
+    monkeypatch.setattr(main, "_initialize_runtime", slow_initialize)
+    try:
+        with TestClient(app) as client:
+            assert started.wait(timeout=2)
+            assert client.get("/health").json() == {"status": "ok"}
+            assert client.get("/ready").status_code == 503
+            cors_preflight = client.options(
+                "/api/v1/search",
+                headers={
+                    "Origin": "http://localhost:5173",
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+            assert cors_preflight.status_code == 200
+            assert cors_preflight.headers["access-control-allow-origin"] == (
+                "http://localhost:5173"
+            )
+            response = client.post(
+                "/api/v1/search",
+                json={"query": "Section 482", "retriever": "bm25", "k": 5},
+            )
+            assert response.status_code == 503
+            assert response.json()["status"] == "initializing"
+            release.set()
+            _wait_until_ready(client)
+    finally:
+        release.set()
+
+
+def test_runtime_initialization_failure_is_reported_without_exposing_details(monkeypatch) -> None:
+    from backend.app import main
+
+    def fail_initialize(application) -> None:
+        raise RuntimeError("database password must not be exposed")
+
+    monkeypatch.setattr(main, "_initialize_runtime", fail_initialize)
+    with TestClient(app) as client:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            response = client.get("/ready")
+            if response.status_code == 503 and response.json()["status"] == "failed":
+                break
+            time.sleep(0.01)
+        assert response.status_code == 503
+        assert response.json()["status"] == "failed"
+        assert "password" not in response.json()["detail"]
+        search = client.post(
+            "/api/v1/search",
+            json={"query": "Section 482", "retriever": "bm25", "k": 5},
+        )
+        assert search.status_code == 503
+        assert search.json()["status"] == "failed"
