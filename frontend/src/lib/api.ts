@@ -1,4 +1,8 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+export const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ??
+  (import.meta.env.VITE_API_HOST
+    ? `https://${import.meta.env.VITE_API_HOST}.onrender.com`
+    : 'http://localhost:8000');
 
 export type Retriever = 'bm25' | 'dense' | 'hybrid';
 
@@ -53,6 +57,7 @@ export interface ExperimentRun {
   document_count?: number;
   chunk_count?: number;
   systems?: Record<string, Record<string, number>>;
+  comparisons?: Record<string, unknown>;
 }
 
 export interface AuthSession { access_token: string; token_type: string; role: 'user' | 'admin' }
@@ -60,7 +65,7 @@ export interface UserProfile { username: string; role: 'user' | 'admin' }
 export interface AdminOverview { corpus_documents: number; corpus_chunks: number; experiment_runs: number; users: number }
 export interface AdminUser { username: string; role: string; created_at: string }
 
-async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(input, init);
   } catch (error) {

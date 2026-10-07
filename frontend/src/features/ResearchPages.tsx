@@ -33,7 +33,7 @@ import {
   YAxis,
 } from 'recharts';
 import { Link, useParams } from 'react-router-dom';
-import { api, CompareResponse, ExperimentRun, Hit, Retriever } from '../lib/api';
+import { API_BASE, api, CompareResponse, ExperimentRun, fetchApi, Hit, Retriever } from '../lib/api';
 
 const ENGINE_NAMES: Retriever[] = ['bm25', 'dense', 'hybrid'];
 const ENGINE_LABELS: Record<Retriever, string> = { bm25: 'BM25', dense: 'Dense', hybrid: 'Hybrid' };
@@ -96,10 +96,14 @@ function CompareResults({ result, baseline }: { result: CompareResponse; baselin
 function MetricChart({ runs }: { runs: ExperimentRun[] }) {
   const latest = runs[0]?.systems;
   if (!latest) return <div className="chart-empty"><FlaskConical size={22} /><span>No completed experiment metrics yet.</span></div>;
+  const activeEngines = ENGINE_NAMES.filter((engine) => latest[engine] !== undefined);
   const keys = ['map', 'mrr', 'ndcg@10', 'precision@5'];
   const data = keys.map((metric) => ({
     metric: metric.toUpperCase(),
-    ...Object.fromEntries(ENGINE_NAMES.map((engine) => [ENGINE_LABELS[engine], latest[engine]?.[metric] ?? 0])),
+    ...Object.fromEntries(activeEngines.flatMap((engine) => {
+      const score = latest[engine]?.[metric];
+      return typeof score === 'number' ? [[ENGINE_LABELS[engine], score]] : [];
+    })),
   }));
   return (
     <ResponsiveContainer width="100%" height={268}>
@@ -109,7 +113,7 @@ function MetricChart({ runs }: { runs: ExperimentRun[] }) {
         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#758078', fontSize: 11 }} domain={[0, 1]} />
         <Tooltip formatter={(value) => Number(value).toFixed(3)} contentStyle={{ borderRadius: 12, borderColor: '#e8e4dc', fontSize: 12 }} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        {ENGINE_NAMES.map((engine) => <Bar key={engine} dataKey={ENGINE_LABELS[engine]} fill={ENGINE_COLORS[engine]} radius={[4, 4, 0, 0]} maxBarSize={27}><Cell fill={ENGINE_COLORS[engine]} /></Bar>)}
+        {activeEngines.map((engine) => <Bar key={engine} dataKey={ENGINE_LABELS[engine]} fill={ENGINE_COLORS[engine]} radius={[4, 4, 0, 0]} maxBarSize={27}><Cell fill={ENGINE_COLORS[engine]} /></Bar>)}
       </BarChart>
     </ResponsiveContainer>
   );
@@ -123,9 +127,9 @@ export function ExperimentsPage() {
       {isError && <ErrorState message={error.message} />}
       <div className="experiment-summary-row">
         <div className="experiment-summary"><span>EXPERIMENT RUNS</span><strong>{isLoading ? '—' : runs?.length ?? 0}</strong><small>Recorded local evaluations</small></div>
-        <div className="experiment-summary"><span>RETRIEVAL SYSTEMS</span><strong>03</strong><small>Same corpus · same queries</small></div>
+        <div className="experiment-summary"><span>RETRIEVAL SYSTEMS</span><strong>{isLoading ? '—' : Object.keys(runs?.[0]?.systems ?? {}).length}</strong><small>Reported in latest run</small></div>
         <div className="experiment-summary"><span>PRIMARY METRIC</span><strong className="summary-word">MAP</strong><small>Mean average precision</small></div>
-        <div className="experiment-summary"><span>STATISTICAL TEST</span><strong className="summary-word">Paired</strong><small>Wilcoxon + t-test</small></div>
+        <div className="experiment-summary"><span>STATISTICAL TEST</span><strong className="summary-word">{Object.keys(runs?.[0]?.comparisons ?? {}).length ? 'Paired' : 'Not run'}</strong><small>Only when systems are compared</small></div>
       </div>
       <section className="chart-panel"><div className="panel-heading"><div><span className="section-kicker">LATEST REPRODUCIBLE RUN</span><h2>Retrieval quality by system</h2></div>{runs?.[0] && <span className="run-label"><span /> {runs[0].run_id}</span>}</div>{isLoading ? <div className="loading-card"><LoaderCircle className="spin" /> Loading experiment runs…</div> : runs?.length ? <MetricChart runs={runs} /> : <div className="chart-empty"><FlaskConical size={22} /><span>No completed metrics to visualize yet.</span><small>Prepare authorized corpus, query, and relevance-judgment files, then run <code>make experiment</code>.</small></div>}</section>
       {runs?.[0] && <div className="experiment-run-details"><div><span className="section-kicker">RUN METADATA</span><h2>Reproducibility record</h2></div><div className="run-detail-grid"><span>Run identifier</span><strong>{runs[0].run_id}</strong><span>Queries evaluated</span><strong>{runs[0].query_count ?? '—'}</strong><span>Documents / chunks</span><strong>{runs[0].document_count ?? '—'} / {runs[0].chunk_count ?? '—'}</strong><span>Fixed random seed</span><strong>{runs[0].seed ?? '—'}</strong></div></div>}
@@ -143,7 +147,7 @@ export function DocumentLibraryPage() {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['documents'],
     queryFn: async () => {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'}/api/v1/documents`);
+      const response = await fetchApi(`${API_BASE}/api/v1/documents`);
       if (!response.ok) throw new Error(`Document listing failed (${response.status})`);
       return (await response.json()) as { documents: DocumentSummary[]; total: number };
     },
@@ -167,8 +171,7 @@ export function DocumentPage() {
   const { data, isLoading, isError, error } = useQuery<DocumentResponse>({
     queryKey: ['document', decodedId],
     queryFn: async () => {
-      const base = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
-      const response = await fetch(`${base}/api/v1/documents/${encodeURIComponent(decodedId)}`);
+      const response = await fetchApi(`${API_BASE}/api/v1/documents/${encodeURIComponent(decodedId)}`);
       if (!response.ok) {
         const detail = (await response.json().catch(() => ({}))) as { detail?: string };
         throw new Error(detail.detail ?? `Document request failed (${response.status})`);
