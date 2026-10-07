@@ -28,6 +28,12 @@ BM25 search works without an LLM. Dense or hybrid search loads the configured se
 
 The application starts with an empty index. Search and comparison return honest empty states until you add a legally authorized corpus.
 
+## Deploy to Render
+
+The repository includes [`render.yaml`](render.yaml) as a Render Blueprint. In Render, choose **New + → Blueprint**, connect this repository, and deploy the `main` branch. The Blueprint creates a static frontend, Docker-based API, and PostgreSQL database. Set `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD` when prompted; `JWT_SECRET_KEY` is generated automatically.
+
+The Blueprint uses Render's free plans to avoid automatic charges. Free web services can spin down when idle, and free PostgreSQL has limited lifetime/storage; choose an appropriate paid plan for persistent production use. The hosted app starts with an empty legal corpus, and grounded QA requires a separately hosted Ollama-compatible endpoint/model. Do not deploy restricted legal data without authorization.
+
 ## Ingest authorized data
 
 Raw sources, normalized documents, chunks, model files, and local database files are excluded from git. Place permitted JSON, JSONL, or CSV inputs under `data/raw/` and configure `configs/data.yaml`. Supported source modes are `aila`, `ildc`, and `legal_qa`; see [`data/README.md`](data/README.md) for the normalized input fields.

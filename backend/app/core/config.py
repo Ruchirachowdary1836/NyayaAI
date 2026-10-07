@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     api_prefix: str = "/api/v1"
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
