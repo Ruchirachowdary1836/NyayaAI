@@ -87,7 +87,7 @@ export interface UserProfile { username: string; role: 'user' | 'admin' }
 export interface AdminOverview { corpus_documents: number; corpus_chunks: number; experiment_runs: number; users: number }
 export interface AdminUser { username: string; role: string; created_at: string }
 
-const transientRetryDelays = [1000, 2000, 3000, 4000, 5000, 6000];
+const transientRetryDelays = [1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 8000, 10000, 10000, 10000];
 
 function pause(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -100,9 +100,10 @@ export async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Pr
   for (let attempt = 0; attempt <= transientRetryDelays.length; attempt += 1) {
     try {
       const response = await fetch(input, init);
-      if (response.status === 503) {
+      if ([502, 503, 504].includes(response.status)) {
         const body = (await response.clone().json().catch(() => null)) as { status?: string } | null;
-        if (body?.status === 'initializing' && attempt < transientRetryDelays.length) {
+        const retryableGateway = response.status !== 503 || !body?.status || body.status === 'initializing';
+        if (retryableGateway && attempt < transientRetryDelays.length) {
           await pause(transientRetryDelays[attempt]);
           continue;
         }

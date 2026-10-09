@@ -105,7 +105,12 @@ function ResultCard({ hit, query, retriever }: { hit: Hit; query: string; retrie
 }
 
 export function SearchWorkspace() {
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health });
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: api.health,
+    refetchInterval: (query) =>
+      query.state.status === 'error' || query.state.data?.status !== 'ready' ? 4000 : 300000,
+  });
   const availableEngines = engineOptions.filter((engine) =>
     (health.data?.available_retrievers ?? ['bm25']).includes(engine.value),
   );
@@ -210,7 +215,7 @@ export function SearchWorkspace() {
               <div><span className="section-kicker">SEARCH RESULTS</span><h2>For “{searchResult?.query ?? submittedQuery}”</h2></div>
               {searchResult && <span className="result-count">{searchResult.hits.length} passages</span>}
             </div>
-            {search.isPending && <div className="loading-card"><LoaderCircle className="spin" /> Searching the legal corpus…</div>}
+            {search.isPending && <div className="loading-card"><LoaderCircle className="spin" />{health.data?.status === 'ready' ? 'Searching the legal corpus…' : 'Connecting to the legal API and searching the corpus…'}</div>}
             {searchResult && !searchResult.corpus_available && <div className="empty-corpus"><BookOpen size={20} /><div><strong>No legal documents are indexed</strong><p>For local development, add an authorized dataset under <code>data/raw/</code>, configure <code>configs/data.yaml</code>, and run <code>make ingest</code>. The hosted deployment includes the attributed AILA 2019 corpus.</p></div></div>}
             {searchResult?.corpus_available && !hits.length && <div className="empty-corpus"><Search size={20} /><div><strong>No passages matched this query</strong><p>Try a broader legal concept, a case name, or a statute section number.</p></div></div>}
             {hits.map((hit) => <ResultCard key={hit.chunk_id} hit={hit} query={submittedQuery} retriever={selectedRetriever} />)}
