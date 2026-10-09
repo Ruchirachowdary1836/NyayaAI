@@ -87,18 +87,41 @@ export interface UserProfile { username: string; role: 'user' | 'admin' }
 export interface AdminOverview { corpus_documents: number; corpus_chunks: number; experiment_runs: number; users: number }
 export interface AdminUser { username: string; role: string; created_at: string }
 
+const transientRetryDelays = [1000, 2000, 3000, 4000, 5000, 6000];
+
+function pause(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 export async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  try {
-    return await fetch(input, init);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      const url = new URL(input instanceof Request ? input.url : input.toString(), window.location.origin);
-      throw new Error(
-        `Could not reach the NyayaAI API at ${url.origin}. Check the API service URL and deployment status.`,
-      );
+  const url = new URL(input instanceof Request ? input.url : input.toString(), window.location.origin);
+  let lastNetworkError: TypeError | undefined;
+
+  for (let attempt = 0; attempt <= transientRetryDelays.length; attempt += 1) {
+    try {
+      const response = await fetch(input, init);
+      if (response.status === 503) {
+        const body = (await response.clone().json().catch(() => null)) as { status?: string } | null;
+        if (body?.status === 'initializing' && attempt < transientRetryDelays.length) {
+          await pause(transientRetryDelays[attempt]);
+          continue;
+        }
+      }
+      return response;
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      lastNetworkError = error;
+      if (attempt < transientRetryDelays.length) {
+        await pause(transientRetryDelays[attempt]);
+        continue;
+      }
     }
-    throw error;
   }
+
+  const networkDetail = lastNetworkError?.message ? ` (${lastNetworkError.message})` : '';
+  throw new Error(
+    `Could not reach the NyayaAI API at ${url.origin} after several attempts${networkDetail}. Check the API service URL and deployment status.`,
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit, token?: string): Promise<T> {

@@ -187,8 +187,8 @@ export function SearchWorkspace() {
         {availableEngines.length < engineOptions.length && <p className="comparison-note">Dense and hybrid are disabled on this deployment to keep retrieval within its configured memory budget.</p>}
       </section>
 
-      {search.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Search couldn’t be completed</strong><span>{search.error.message}</span></div></div>}
-      {answer.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Answer generation is unavailable</strong><span>{answer.error.message}. Configure the selected {health.data?.generation_provider ?? 'AI'} provider in the API service before NyayaAI can generate answers.</span></div></div>}
+      {search.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Search couldn’t be completed</strong><span>{search.error.message}</span><button className="text-action" onClick={() => submit(undefined, submittedQuery)}>Retry search</button></div></div>}
+      {answer.isError && <div className="error-banner" role="alert"><ShieldAlert size={17} /><div><strong>Answer generation is unavailable</strong><span>{answer.error.message}. Configure the selected {health.data?.generation_provider ?? 'AI'} provider in the API service before NyayaAI can generate answers.</span><button className="text-action" onClick={() => submit(undefined, submittedQuery)}>Retry answer</button></div></div>}
       {answer.isPending && streamedAnswer && <section className="answer-streaming-panel" aria-live="polite"><span className="streaming-indicator"><LoaderCircle className="spin" size={14} /> ANSWER STREAMING</span><p>{streamedAnswer}<i className="streaming-caret" /></p><small>Checking passage citations when generation completes…</small></section>}
 
       {!submittedQuery && (

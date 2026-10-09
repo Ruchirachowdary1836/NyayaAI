@@ -152,7 +152,7 @@ interface DocumentResponse { document: { doc_id: string; text: string; source: s
 
 export function DocumentLibraryPage() {
   const [filter, setFilter] = useState('');
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['documents'],
     queryFn: async () => {
       const response = await fetchApi(`${API_BASE}/api/v1/documents`);
@@ -164,10 +164,10 @@ export function DocumentLibraryPage() {
   return (
     <div className="subpage">
       <PageTitle eyebrow="SOURCE LIBRARY" title="The corpus, in context." description="Browse the authorized source documents that power retrieval. Open a document to review its full text and chunk boundaries." />
-      <div className="library-toolbar"><div><Database size={16} /><strong>{data?.total ?? 0}</strong><span>indexed documents</span></div><label><Search size={15} /><input aria-label="Filter documents" placeholder="Filter by case, source or court…" value={filter} onChange={(event) => setFilter(event.target.value)} /></label></div>
-      {isError && <ErrorState message={error.message} />}
+      <div className="library-toolbar"><div><Database size={16} /><strong>{isLoading ? '…' : isError ? '—' : data?.total ?? 0}</strong><span>{isError ? 'document count unavailable' : 'indexed documents'}</span></div><label><Search size={15} /><input aria-label="Filter documents" placeholder="Filter by case, source or court…" value={filter} onChange={(event) => setFilter(event.target.value)} /></label></div>
+      {isError && <><ErrorState message={error.message} /><button className="text-action" onClick={() => void refetch()}>Retry loading documents</button></>}
       {isLoading && <div className="loading-card"><LoaderCircle className="spin" /> Loading the source library…</div>}
-      {!isLoading && documents.length === 0 && <div className="empty-state-card"><BookOpenText size={23} /><h2>{filter ? 'No documents match that filter.' : 'No documents in the index yet.'}</h2><p>After adding authorized data, run the ingestion pipeline to prepare documents for source review.</p><code>make ingest</code></div>}
+      {!isLoading && !isError && documents.length === 0 && <div className="empty-state-card"><BookOpenText size={23} /><h2>{filter ? 'No documents match that filter.' : 'No documents in the index yet.'}</h2><p>After adding authorized data, run the ingestion pipeline to prepare documents for source review.</p><code>make ingest</code></div>}
       <div className="document-list">{documents.map((document) => <Link className="document-list-item" key={document.doc_id} to={`/documents/${encodeURIComponent(document.doc_id)}`}><span className="document-list-icon"><BookOpenText size={17} /></span><span className="document-list-copy"><strong>{String(document.metadata.title ?? document.metadata.citation ?? document.doc_id)}</strong><small>{String(document.metadata.document_type ?? document.source).toUpperCase()} {document.metadata.court ? `· ${document.metadata.court}` : ''} {document.metadata.year ? `· ${document.metadata.year}` : ''}</small><p>{document.excerpt}</p></span><ArrowRight size={16} /></Link>)}</div>
     </div>
   );
@@ -232,6 +232,13 @@ export function AdminPage() {
       : health.data?.status === 'initializing'
         ? 'Starting'
         : 'Operational';
+  const healthDetails = health.isError
+    ? health.error.message
+    : health.isLoading
+      ? 'Checking corpus and API readiness…'
+      : health.data?.status === 'initializing'
+        ? 'Corpus indexing is in progress; document counts will appear when the API is ready.'
+        : `Health checks refresh every 30 seconds. ${health.data?.corpus_documents ?? 0} documents, ${health.data?.corpus_chunks ?? 0} indexed passages. AI generation ${health.data?.generation_configured ? 'configured' : 'not configured'}.`;
   const logout = () => {
     localStorage.removeItem('nyayaai-token');
     setToken('');
@@ -239,7 +246,7 @@ export function AdminPage() {
   return (
     <div className="subpage">
       <PageTitle eyebrow="LOCAL ADMINISTRATION" title="System health & data readiness." description="A transparent view of the local research services. Corpus and model availability are reported as observed, not assumed." />
-      <div className="admin-status-banner"><div className={`status-emblem ${health.isError ? 'status-emblem-error' : ''}`}>{health.isError ? <TriangleAlert size={21} /> : <Activity size={21} />}</div><div><span>API SERVICE</span><strong>{status}</strong><small>{health.isError ? health.error.message : `Health checks refresh every 30 seconds. ${health.data?.corpus_documents ?? 0} documents, ${health.data?.corpus_chunks ?? 0} indexed passages. AI generation ${health.data?.generation_configured ? 'configured' : 'not configured'}.`}</small></div><span className={health.isError ? 'service-status failed' : 'service-status'}><i /> {status}</span></div>
+      <div className="admin-status-banner"><div className={`status-emblem ${health.isError ? 'status-emblem-error' : ''}`}>{health.isError ? <TriangleAlert size={21} /> : <Activity size={21} />}</div><div><span>API SERVICE</span><strong>{status}</strong><small>{healthDetails}</small></div><span className={health.isError ? 'service-status failed' : 'service-status'}><i /> {status}</span></div>
       {!token && <form className="admin-login-card" onSubmit={(event) => { event.preventDefault(); authenticate.mutate(); }}>
         <div><LockKeyhole size={18} /><h2>{register ? 'Create a researcher account' : 'Administrator sign-in'}</h2><p>Admin access requires credentials bootstrapped with <code>INITIAL_ADMIN_USERNAME</code> and <code>INITIAL_ADMIN_PASSWORD</code>. New accounts have the user role.</p></div>
         <label>Username<input autoComplete="username" minLength={3} value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
