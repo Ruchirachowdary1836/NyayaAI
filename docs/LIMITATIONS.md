@@ -20,7 +20,11 @@ NyayaAI is a research tool. These limits are deliberate to state plainly.
 - Dense retrieval needs the optional `dense` dependencies and enough memory/CPU. Embedding the
   full corpus with `all-MiniLM-L6-v2` on a laptop CPU takes on the order of an hour; the result
   is cached. That model reads only the first 256 word pieces of each ~480-token chunk.
-  The free Render plan runs BM25 only.
+- With the embeddings-API provider (used on Render), dense and hybrid are unavailable until the
+  one-off background build finishes, and its speed depends on the provider's rate limits and
+  quota. Each dense query makes one API call, so dense search depends on the provider being
+  reachable. Gemini embeddings have not been benchmarked on AILA in this repository; the MiniLM
+  results in `docs/EVALUATION.md` do not transfer to them.
 - Hybrid fusion parameters (`HYBRID_METHOD`, `HYBRID_ALPHA`, `HYBRID_RRF_K`) can be sensitive to
   query type and corpus.
 

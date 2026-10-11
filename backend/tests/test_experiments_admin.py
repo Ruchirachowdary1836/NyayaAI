@@ -115,7 +115,7 @@ def test_admin_overview_and_user_management(client) -> None:
     assert overview["users"] == 2
     assert overview["corpus_documents"] == 3
     assert overview["system"]["database"] == "ok"
-    assert overview["system"]["schema_revision"] == "0002_platform_tables"
+    assert overview["system"]["schema_revision"] == "0003_embedding_batches"
     assert any(row["event_type"] == "search" for row in overview["usage_last_24h"])
     assert "query" not in json.dumps(overview["usage_last_24h"])
 

@@ -26,7 +26,7 @@ def test_migrations_create_schema_and_are_idempotent(tmp_path):
     database = Database(f"sqlite:///{(tmp_path / 'fresh.db').as_posix()}")
     database.initialize()
     database.initialize()
-    assert database.schema_revision() == "0002_platform_tables"
+    assert database.schema_revision() == "0003_embedding_batches"
     tables = set(inspect(database.engine).get_table_names())
     assert {
         "users",

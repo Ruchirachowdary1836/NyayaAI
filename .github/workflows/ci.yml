@@ -40,7 +40,7 @@ jobs:
         run: |
           alembic upgrade head
           alembic upgrade head
-          python -c "from backend.app.db.database import Database; import os; db = Database(os.environ['DATABASE_URL']); print(db.schema_revision()); assert db.schema_revision() == '0002_platform_tables'"
+          python -c "from backend.app.db.database import Database; import os; db = Database(os.environ['DATABASE_URL']); print(db.schema_revision()); assert db.schema_revision() == '0003_embedding_batches'"
       - name: Run database tests against PostgreSQL
         env:
           NYAYAAI_TEST_POSTGRES_URL: postgresql://nyayaai:ci-only-password@localhost:5432/nyayaai_test

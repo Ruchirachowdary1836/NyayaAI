@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from backend.app.services.ingestion.chunker import LegalChunk
@@ -55,6 +56,14 @@ class RetrieverRegistry:
         self._dense_settings = (embedding_model, alpha, fusion_method, rrf_k)
         self._embedding_cache_dir = embedding_cache_dir
         self._chunks_by_doc: dict[str, list[LegalChunk]] | None = None
+        # Background mode (embeddings API): the index is built by a worker thread and
+        # requests never block on it; they get an explicit "building" error instead.
+        self._background = False
+        self._build_progress: tuple[int, int] | None = None
+        self._dense_label = embedding_model
+        self._dense_retrying = False
+        self._stop = threading.Event()
+        self._worker: threading.Thread | None = None
         self._document_count = len({chunk.doc_id for chunk in chunks})
 
     def get(self, name: str) -> Retriever:
@@ -63,14 +72,92 @@ class RetrieverRegistry:
         if name not in self._enabled_retrievers:
             raise RuntimeError(f"{name.title()} retrieval is disabled by deployment configuration.")
         if name in {"dense", "hybrid"} and self._dense is None:
+            if self._background:
+                raise RuntimeError(self._unavailable_message())
             self._load_dense()
         return self._retrievers[name]
+
+    def _unavailable_message(self) -> str:
+        if self._dense_error and not self._dense_retrying:
+            return (
+                f"Dense retrieval is unavailable: {self._dense_error} "
+                "BM25 search remains available."
+            )
+        if self._build_progress:
+            done, total = self._build_progress
+            return (
+                f"The dense index is still being built ({done:,} of {total:,} passages "
+                "embedded). BM25 search is available now; try dense or hybrid later."
+            )
+        return "The dense index is being prepared. BM25 search is available now."
+
+    def _install_dense(self, dense: DenseRetriever) -> None:
+        _, alpha, method, rrf_k = self._dense_settings
+        self._retrievers["dense"] = dense
+        self._retrievers["hybrid"] = HybridRetriever(
+            self._bm25, dense, method=method, alpha=alpha, rrf_k=rrf_k
+        )
+        self._dense = dense
+        self._dense_error = None
+        self._dense_retrying = False
+
+    def mark_dense_unavailable(self, reason: str, label: str | None = None) -> None:
+        """Report dense/hybrid as failed without attempting to load anything."""
+        self._background = True
+        self._dense_error = reason
+        if label:
+            self._dense_label = label
+
+    def start_background_dense(
+        self,
+        build: Callable[[Callable[[int, int], None], threading.Event], DenseRetriever],
+        label: str,
+        retry_delay: float = 300.0,
+        is_retryable: Callable[[Exception], bool] = lambda error: False,
+    ) -> None:
+        """Build the dense engine in a worker thread, retrying transient failures."""
+        if not ({"dense", "hybrid"} & set(self._enabled_retrievers)) or not self._chunks:
+            return
+        self._background = True
+        self._dense_label = label
+
+        def progress(done: int, total: int) -> None:
+            self._build_progress = (done, total)
+
+        def run() -> None:
+            while not self._stop.is_set():
+                self._dense_loading = True
+                try:
+                    dense = build(progress, self._stop)
+                except Exception as error:  # noqa: BLE001 - reported via status()
+                    self._dense_loading = False
+                    if self._stop.is_set():
+                        return
+                    self._dense_error = str(error)
+                    self._dense_retrying = is_retryable(error)
+                    logger.warning("Dense index build failed: %s", error)
+                    if not self._dense_retrying:
+                        return
+                    self._stop.wait(retry_delay)
+                    continue
+                self._dense_loading = False
+                self._install_dense(dense)
+                logger.info("Dense index ready (%d passages)", len(self._chunks))
+                return
+
+        self._worker = threading.Thread(target=run, name="dense-index-builder", daemon=True)
+        self._worker.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._worker is not None:
+            self._worker.join(timeout=5)
 
     def _load_dense(self) -> None:
         with self._dense_lock:
             if self._dense is not None:
                 return
-            model, alpha, method, rrf_k = self._dense_settings
+            model = self._dense_settings[0]
             self._dense_loading = True
             try:
                 kwargs = (
@@ -86,12 +173,7 @@ class RetrieverRegistry:
                 ) from error
             finally:
                 self._dense_loading = False
-            self._retrievers["dense"] = dense
-            self._retrievers["hybrid"] = HybridRetriever(
-                self._bm25, dense, method=method, alpha=alpha, rrf_k=rrf_k
-            )
-            self._dense = dense
-            self._dense_error = None
+            self._install_dense(dense)
 
     def warm(self) -> None:
         """Load the dense engine eagerly when it is enabled (used by deployments that opt in)."""
@@ -102,7 +184,8 @@ class RetrieverRegistry:
                 pass
 
     def status(self) -> dict[str, dict[str, object]]:
-        model, alpha, method, rrf_k = self._dense_settings
+        _, alpha, method, rrf_k = self._dense_settings
+        model = self._dense_label
         statuses: dict[str, dict[str, object]] = {}
         for name in self._available_retrievers:
             if name not in self._enabled_retrievers:
@@ -111,10 +194,24 @@ class RetrieverRegistry:
                 statuses[name] = {"state": "ready", "chunks": len(self._chunks)}
             elif self._dense is not None:
                 statuses[name] = {"state": "ready", "model": model}
+            elif self._dense_loading and self._background:
+                done, total = self._build_progress or (0, len(self._chunks))
+                statuses[name] = {
+                    "state": "building",
+                    "model": model,
+                    "progress": {"embedded": done, "total": total},
+                }
             elif self._dense_loading:
                 statuses[name] = {"state": "loading", "model": model}
             elif self._dense_error:
-                statuses[name] = {"state": "failed", "model": model, "error": self._dense_error}
+                statuses[name] = {
+                    "state": "failed",
+                    "model": model,
+                    "error": self._dense_error,
+                    "retrying": self._dense_retrying,
+                }
+            elif self._background:
+                statuses[name] = {"state": "building", "model": model}
             else:
                 statuses[name] = {"state": "not_loaded", "model": model}
             if name == "hybrid" and name in self._enabled_retrievers:
@@ -132,6 +229,10 @@ class RetrieverRegistry:
     @property
     def available(self) -> list[str]:
         return list(self._enabled_retrievers)
+
+    @property
+    def chunks(self) -> list[LegalChunk]:
+        return self._chunks
 
     @property
     def corpus_size(self) -> int:

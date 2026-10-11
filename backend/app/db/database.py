@@ -10,6 +10,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import IntegrityError
 
 from backend.app.db.tables import (
+    embedding_batches,
     experiments,
     feedback,
     metadata,
@@ -515,6 +516,51 @@ class Database:
             statement = statement.where(experiments.c.owner == owner)
         with self.engine.connect() as connection:
             return int(connection.execute(statement).scalar_one())
+
+    # ----------------------------------------------------------------- embeddings
+    def save_embedding_batch(
+        self, cache_key: str, batch_index: int, row_count: int, dimensions: int, vectors: bytes
+    ) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                delete(embedding_batches).where(
+                    embedding_batches.c.cache_key == cache_key,
+                    embedding_batches.c.batch_index == batch_index,
+                )
+            )
+            connection.execute(
+                insert(embedding_batches).values(
+                    cache_key=cache_key,
+                    batch_index=batch_index,
+                    row_count=row_count,
+                    dimensions=dimensions,
+                    vectors=vectors,
+                    created_at=utcnow(),
+                )
+            )
+
+    def load_embedding_batches(self, cache_key: str) -> dict[int, tuple[int, int, bytes]]:
+        with self.engine.connect() as connection:
+            rows = connection.execute(
+                select(
+                    embedding_batches.c.batch_index,
+                    embedding_batches.c.row_count,
+                    embedding_batches.c.dimensions,
+                    embedding_batches.c.vectors,
+                ).where(embedding_batches.c.cache_key == cache_key)
+            ).all()
+        return {
+            int(row.batch_index): (int(row.row_count), int(row.dimensions), bytes(row.vectors))
+            for row in rows
+        }
+
+    def delete_stale_embeddings(self, keep_cache_key: str) -> int:
+        """Remove vectors for corpora or models that are no longer in use."""
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                delete(embedding_batches).where(embedding_batches.c.cache_key != keep_cache_key)
+            )
+        return int(result.rowcount or 0)
 
     # ---------------------------------------------------------------------- usage
     def record_usage(

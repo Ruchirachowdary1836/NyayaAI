@@ -19,7 +19,7 @@ Interactive OpenAPI documentation is served at `/docs` (Swagger UI) and `/redoc`
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Liveness; available during startup. |
-| GET | `/ready` | Readiness: `status`, `database`, corpus counts, `available_retrievers`, per-engine `retrievers` state (`ready`, `not_loaded`, `loading`, `failed`, `disabled`), generation provider/model/configured. 503 while initializing or if the database is unreachable. |
+| GET | `/ready` | Readiness: `status`, `database`, corpus counts, `available_retrievers`, per-engine `retrievers` state (`ready`, `not_loaded`, `loading`, `building` with `progress`, `failed` with `retrying`, `disabled`), generation provider/model/configured. 503 while initializing or if the database is unreachable. |
 
 ## Authentication
 

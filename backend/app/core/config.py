@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     # Characters of each retrieved passage sent to the model (query-focused window).
     qa_passage_chars: int = 1200
     embedding_model: str = "BAAI/bge-m3"
+    # "local" runs sentence-transformers in-process (needs the 'dense' extra);
+    # "openai" calls an OpenAI-compatible /embeddings API (e.g. Gemini) and stores vectors
+    # in the database so they survive restarts on hosts with ephemeral disks.
+    embedding_provider: str = "local"
+    embedding_api_base_url: str = ""  # defaults to GENERATOR_API_BASE_URL
+    embedding_api_key: str = ""  # defaults to GENERATOR_API_KEY
+    embedding_dimensions: int | None = None  # truncate (Matryoshka) and renormalize
+    embedding_batch_size: int = 50
+    embedding_requests_per_minute: int = 60
     enabled_retrievers: list[str] = ["bm25"]
     hybrid_method: str = "rrf"
     hybrid_alpha: float = 0.7
@@ -51,6 +60,26 @@ class Settings(BaseSettings):
         if value not in {"rrf", "weighted"}:
             raise ValueError("HYBRID_METHOD must be 'rrf' or 'weighted'")
         return value
+
+    @field_validator("embedding_dimensions", mode="before")
+    @classmethod
+    def _empty_dimensions_means_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("embedding_provider")
+    @classmethod
+    def _validate_embedding_provider(cls, value: str) -> str:
+        if value not in {"local", "openai"}:
+            raise ValueError("EMBEDDING_PROVIDER must be 'local' or 'openai'")
+        return value
+
+    @property
+    def resolved_embedding_api_base_url(self) -> str:
+        return (self.embedding_api_base_url or self.generator_api_base_url).rstrip("/")
+
+    @property
+    def resolved_embedding_api_key(self) -> str:
+        return self.embedding_api_key or self.generator_api_key
 
     @field_validator("hybrid_alpha")
     @classmethod
