@@ -130,3 +130,16 @@ usage_events = Table(
     Index("ix_usage_events_created_at", "created_at"),
     Index("ix_usage_events_username", "username"),
 )
+
+# Dense vectors computed through an embeddings API, stored in batches so a long
+# corpus build can resume after restarts and survive redeploys on ephemeral disks.
+embedding_batches = Table(
+    "embedding_batches",
+    metadata,
+    Column("cache_key", String(64), primary_key=True),
+    Column("batch_index", Integer, primary_key=True),
+    Column("row_count", Integer, nullable=False),
+    Column("dimensions", Integer, nullable=False),
+    Column("vectors", LargeBinary, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)

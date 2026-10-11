@@ -32,6 +32,12 @@ from backend.app.db.database import Database
 from backend.app.services.auth import initialize_auth_store
 from backend.app.services.generation.llm import build_generator
 from backend.app.services.retrieval.corpus import CorpusStore
+from backend.app.services.retrieval.dense import DenseRetriever
+from backend.app.services.retrieval.embeddings import (
+    EmbeddingAPIClient,
+    EmbeddingError,
+    EmbeddingIndexBuilder,
+)
 from backend.app.services.retrieval.registry import RetrieverRegistry
 from backend.app.services.retrieval.service import load_chunks
 
@@ -47,6 +53,43 @@ _SECURITY_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Cross-Origin-Resource-Policy": "same-site",
 }
+
+
+def _start_api_embeddings(retrievers: RetrieverRegistry, database: Database) -> None:
+    """Embed the corpus through the configured embeddings API in the background."""
+    dimensions = settings.embedding_dimensions
+    label = f"{settings.embedding_model}" + (f" ({dimensions} dims)" if dimensions else "")
+    client = EmbeddingAPIClient(
+        base_url=settings.resolved_embedding_api_base_url,
+        api_key=settings.resolved_embedding_api_key,
+        model=settings.embedding_model,
+        dimensions=dimensions,
+        requests_per_minute=settings.embedding_requests_per_minute,
+    )
+    if not client.configured:
+        retrievers.mark_dense_unavailable(
+            "no embeddings API key is configured (set EMBEDDING_API_KEY or GENERATOR_API_KEY).",
+            label,
+        )
+        return
+    builder = EmbeddingIndexBuilder(
+        retrievers.chunks, client, database, batch_size=settings.embedding_batch_size
+    )
+
+    def build(on_progress, stop) -> DenseRetriever:
+        vectors = builder.build(on_progress=on_progress, stop=stop)
+        return DenseRetriever(
+            retrievers.chunks,
+            model_name=settings.embedding_model,
+            encoder=client.encode_query,
+            vectors=vectors,
+        )
+
+    retrievers.start_background_dense(
+        build,
+        label,
+        is_retryable=lambda error: isinstance(error, EmbeddingError) and error.retryable,
+    )
 
 
 def _initialize_runtime(application: FastAPI) -> None:
@@ -76,6 +119,9 @@ def _initialize_runtime(application: FastAPI) -> None:
     except Exception:
         database.close()
         raise
+
+    if settings.embedding_provider == "openai":
+        _start_api_embeddings(retrievers, database)
 
     application.state.retrievers = retrievers
     application.state.corpus = corpus
@@ -125,6 +171,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         if not initialization_task.done():
             initialization_task.cancel()
             await asyncio.gather(initialization_task, return_exceptions=True)
+        retrievers = application.state.retrievers
+        if retrievers is not None:
+            retrievers.stop()
         database = application.state.database
         if database is not None:
             database.close()

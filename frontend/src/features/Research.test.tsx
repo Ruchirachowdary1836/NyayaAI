@@ -145,3 +145,14 @@ describe('experiments', () => {
     });
   });
 });
+
+describe('engine status labels', () => {
+  it('shows index build progress and retry state', async () => {
+    const { engineStateLabel } = await import('./DashboardPage');
+    expect(engineStateLabel({ state: 'building', progress: { embedded: 12089, total: 24178 } })).toBe('Building index · 50%');
+    expect(engineStateLabel({ state: 'building' })).toBe('Building index…');
+    expect(engineStateLabel({ state: 'failed', retrying: true })).toBe('Retrying soon');
+    expect(engineStateLabel({ state: 'failed' })).toBe('Unavailable');
+    expect(engineStateLabel(undefined)).toBe('Unknown');
+  });
+});

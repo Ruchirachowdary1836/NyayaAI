@@ -112,7 +112,10 @@ full list with comments.
 | `INITIAL_ADMIN_USERNAME` / `_PASSWORD` | Bootstrap administrator | empty |
 | `CORS_ORIGINS` | JSON list of allowed web origins | local Vite origins |
 | `ENABLED_RETRIEVERS` | JSON list from `bm25`, `dense`, `hybrid` | `["bm25"]` |
-| `EMBEDDING_MODEL` | Sentence-transformer for dense retrieval | `BAAI/bge-m3` (set a smaller model such as `sentence-transformers/all-MiniLM-L6-v2` on modest hardware) |
+| `EMBEDDING_PROVIDER` | `local` (sentence-transformers in-process) or `openai` (OpenAI-compatible `/embeddings` API, vectors stored in the database) | `local` |
+| `EMBEDDING_MODEL` | Embedding model for dense retrieval | `BAAI/bge-m3` (use `sentence-transformers/all-MiniLM-L6-v2` on modest hardware, or `gemini-embedding-001` with the API provider) |
+| `EMBEDDING_API_BASE_URL`, `EMBEDDING_API_KEY` | Embeddings API; empty values reuse `GENERATOR_API_BASE_URL` / `GENERATOR_API_KEY` | empty |
+| `EMBEDDING_DIMENSIONS`, `EMBEDDING_BATCH_SIZE`, `EMBEDDING_REQUESTS_PER_MINUTE` | Optional vector truncation (Matryoshka models only), batch size, build throttle | unset, `50`, `60` |
 | `HYBRID_METHOD`, `HYBRID_ALPHA`, `HYBRID_RRF_K` | Fusion strategy | `rrf`, `0.7`, `60` |
 | `GENERATOR_PROVIDER` | `ollama` or `openai` | `ollama` |
 | `GENERATOR_MODEL`, `GENERATOR_API_KEY`, `GENERATOR_API_BASE_URL`, `OLLAMA_BASE_URL` | Provider settings (server-side only) | see `.env.example` |
@@ -186,15 +189,26 @@ and deploy. It creates:
 - `nyayaai-db` — managed PostgreSQL for users, uploads, experiments, and usage.
 
 When prompted, set `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD`, and set
-`GENERATOR_API_KEY` on `nyayaai-api` to enable answers. `JWT_SECRET_KEY` is generated
-automatically. Two values must match your actual service URLs: `CORS_ORIGINS` on the API (the web
+`GENERATOR_API_KEY` on `nyayaai-api` to a Google Gemini API key. The Blueprint uses it for both
+answers (`gemini-2.0-flash`) and dense embeddings (`gemini-embedding-001`, 768 dimensions).
+`JWT_SECRET_KEY` is generated automatically. Two values must match your actual service URLs: `CORS_ORIGINS` on the API (the web
 origin) and `VITE_API_BASE_URL` on the static site (the API origin, which requires a rebuild when
 changed).
 
-The free plans have limits: the API sleeps when idle (the web app retries through cold starts),
-512 MB memory restricts it to BM25, and free PostgreSQL instances expire — choose paid plans for
-durable production data. Dense embeddings on an ephemeral disk are rebuilt after each deploy;
-use a persistent disk mounted at `INDEX_DIR` if you enable dense retrieval.
+**Dense and hybrid on the free plan.** With `EMBEDDING_PROVIDER=openai` the instance runs no
+PyTorch: after startup a background job embeds the 24,178 passages through the embeddings API in
+batches of 50 (throttled to `EMBEDDING_REQUESTS_PER_MINUTE`) and stores each batch in PostgreSQL.
+While it runs, `/ready` and the dashboard show "Building index · n%", and dense/hybrid requests
+return an explicit "still being built" message while BM25 keeps working. Progress survives sleeps,
+restarts, and redeploys; once complete, later starts load the stored vectors (about 37 MB) without
+calling the API. Rate-limit or quota errors are retried every five minutes; bad credentials or an
+unknown model stop the build and are shown in the admin page. Measured locally, the API uses about
+285 MB with the corpus, BM25, and the dense matrix loaded.
+
+The free plans have other limits: the API sleeps when idle (the web app retries through cold
+starts), and free PostgreSQL instances expire — choose paid plans for durable production data.
+With `EMBEDDING_PROVIDER=local` (sentence-transformers) the instance needs the `dense` build extra
+and well over 512 MB.
 
 ## Troubleshooting
 

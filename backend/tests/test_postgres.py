@@ -26,7 +26,7 @@ def database():
 
 
 def test_postgres_schema_and_repository_operations(database) -> None:
-    assert database.schema_revision() == "0002_platform_tables"
+    assert database.schema_revision() == "0003_embedding_batches"
     owner = f"pg_{uuid.uuid4().hex[:8]}"
     assert database.create_user(owner, b"hash", b"salt", "user")
     assert database.get_user_role(owner) == "user"

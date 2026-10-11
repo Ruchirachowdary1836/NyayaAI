@@ -16,9 +16,21 @@ export const ENGINE_STATE_LABEL: Record<RetrieverStatus['state'], string> = {
   ready: 'Ready',
   not_loaded: 'Loads on first use',
   loading: 'Loading model…',
+  building: 'Building index…',
   failed: 'Unavailable',
   disabled: 'Disabled',
 };
+
+/** Human-readable engine state, including index-build progress when available. */
+export function engineStateLabel(status: RetrieverStatus | undefined): string {
+  if (!status) return 'Unknown';
+  if (status.state === 'building' && status.progress?.total) {
+    const percent = Math.floor((status.progress.embedded / status.progress.total) * 100);
+    return `Building index · ${percent}%`;
+  }
+  if (status.state === 'failed' && status.retrying) return 'Retrying soon';
+  return ENGINE_STATE_LABEL[status.state];
+}
 
 export function DashboardPage() {
   const location = useLocation();
@@ -48,7 +60,7 @@ export function DashboardPage() {
                   return (
                     <li key={name}>
                       <span>{ENGINE_LABELS[name]} retrieval</span>
-                      <StatusBadge tone={engineTone(status)}>{status ? ENGINE_STATE_LABEL[status.state] : 'Unknown'}</StatusBadge>
+                      <StatusBadge tone={engineTone(status)}>{engineStateLabel(status)}</StatusBadge>
                     </li>
                   );
                 })}

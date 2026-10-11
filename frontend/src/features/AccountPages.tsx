@@ -21,7 +21,7 @@ import { ErrorState, LoadingCard, PageTitle, Pagination, StatCard, StatusBadge }
 import { api, Retriever, UsageRow, UserProfile } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { ENGINE_LABELS, formatBytes, formatDate, formatMs } from '../lib/format';
-import { ENGINE_STATE_LABEL, engineTone } from './DashboardPage';
+import { engineStateLabel, engineTone } from './DashboardPage';
 
 export function ProfilePage() {
   const { user, applySession } = useAuth();
@@ -170,7 +170,7 @@ export function AdminPage() {
                 <li><span>Database ({String(data.system.database_backend)}, schema {String(data.system.schema_revision)})</span><StatusBadge tone={data.system.database === 'ok' ? 'ok' : 'error'}>{String(data.system.database)}</StatusBadge></li>
                 {(Object.keys(ENGINE_LABELS) as Retriever[]).map((name) => {
                   const status = data.retrievers[name];
-                  return <li key={name}><span>{ENGINE_LABELS[name]}{status?.model ? ` · ${status.model}` : ''}</span><StatusBadge tone={engineTone(status)}>{status ? ENGINE_STATE_LABEL[status.state] : 'Unknown'}</StatusBadge></li>;
+                  return <li key={name}><span>{ENGINE_LABELS[name]}{status?.model ? ` · ${status.model}` : ''}</span><StatusBadge tone={engineTone(status)}>{engineStateLabel(status)}</StatusBadge></li>;
                 })}
                 <li><span>Generation · {String(data.system.generation_provider)} {String(data.system.generation_model ?? '')}</span><StatusBadge tone={data.system.generation_configured ? 'ok' : 'error'}>{data.system.generation_configured ? 'Configured' : 'Not configured'}</StatusBadge></li>
               </ul>

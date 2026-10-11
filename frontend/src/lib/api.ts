@@ -81,9 +81,11 @@ export interface CompareResponse {
 }
 
 export interface RetrieverStatus {
-  state: 'ready' | 'not_loaded' | 'loading' | 'failed' | 'disabled';
+  state: 'ready' | 'not_loaded' | 'loading' | 'building' | 'failed' | 'disabled';
   model?: string;
   error?: string;
+  retrying?: boolean;
+  progress?: { embedded: number; total: number };
   chunks?: number;
   fusion?: string;
   alpha?: number;

@@ -46,7 +46,9 @@ app refuses to start with a default JWT secret, wildcard CORS, SQLite, or an emp
 
 - **BM25**: Okapi BM25 (k1 = 1.5, b = 0.75) with a legal tokenizer that keeps references such as
   `section 482` and `article 21` as single tokens.
-- **Dense**: sentence-transformer embeddings, L2-normalized, exact FAISS inner-product search
+- **Dense**: either an in-process sentence-transformer (`EMBEDDING_PROVIDER=local`) or an
+  OpenAI-compatible embeddings API (`EMBEDDING_PROVIDER=openai`, built in the background and stored
+  in the database). Local mode uses sentence-transformer embeddings, L2-normalized, exact FAISS inner-product search
   (NumPy fallback). Embeddings are cached in `INDEX_DIR` keyed by model + chunk fingerprint, so
   restarts reuse them and any corpus change triggers a rebuild. Load failures are reported as
   `failed` with the reason; nothing falls back silently.
@@ -70,4 +72,5 @@ separately and labelled as not directly sourced.
 |---|---|---|
 | Users, sessions revoked, uploads (bytes + text), experiments, usage, feedback | PostgreSQL (SQLite locally) | Yes (managed database) |
 | Corpus documents/chunks, ingestion report, AILA benchmark | Baked into the API image at build time | Rebuilt reproducibly from the checksummed source |
-| Dense embedding cache | `INDEX_DIR` | No on ephemeral disks; rebuilt on first dense use or via `scripts/build_dense_index.py` |
+| Dense vectors, local provider | `INDEX_DIR` (.npy cache) | No on ephemeral disks; rebuilt on first dense use or via `scripts/build_dense_index.py` |
+| Dense vectors, API provider | PostgreSQL `embedding_batches` (float16) | Yes; built once in the background, resumable |

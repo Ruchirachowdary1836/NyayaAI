@@ -14,6 +14,7 @@ from backend.app.services.retrieval.base import Hit
 
 Encoder = Callable[[list[str]], np.ndarray]
 logger = logging.getLogger("nyayaai.retrieval")
+_SCORE_BLOCK = 4096
 
 
 def corpus_fingerprint(model_name: str, chunks: list[LegalChunk]) -> str:
@@ -36,6 +37,7 @@ class DenseRetriever:
         model_name: str = "BAAI/bge-m3",
         encoder: Encoder | None = None,
         cache_dir: str | Path | None = None,
+        vectors: np.ndarray | None = None,
     ) -> None:
         self.chunks = chunks
         self.model_name = model_name
@@ -45,6 +47,16 @@ class DenseRetriever:
         self.cache_path: Path | None = None
         self.loaded_from_cache = False
         if not chunks:
+            return
+        if vectors is not None:
+            # Precomputed, already-normalized vectors (e.g. from an embeddings API). They are
+            # kept in their stored dtype (float16) to halve memory and searched block-wise.
+            if encoder is None:
+                raise ValueError("A query encoder is required with precomputed vectors")
+            if len(vectors) != len(chunks):
+                raise ValueError("Precomputed vectors do not match the number of chunks")
+            self._vectors = vectors
+            self.loaded_from_cache = True
             return
         if self._encoder is None:
             self._encoder = self._load_sentence_transformer(model_name)
@@ -138,7 +150,11 @@ class DenseRetriever:
                 if index >= 0
             ]
         else:
-            scores = self._vectors @ query_vector
+            scores = np.empty(len(self._vectors), dtype=np.float32)
+            # Score in blocks so float16 matrices are never fully upcast in memory.
+            for start in range(0, len(self._vectors), _SCORE_BLOCK):
+                block = self._vectors[start : start + _SCORE_BLOCK]
+                scores[start : start + len(block)] = block.astype(np.float32) @ query_vector
             top = np.argsort(-scores, kind="stable")[:k]
             ranked = [(int(index), float(scores[index])) for index in top]
         return [

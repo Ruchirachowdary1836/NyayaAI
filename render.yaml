@@ -23,12 +23,14 @@ services:
       # Must list the static site's public origin exactly (scheme + host, no trailing slash).
       - key: CORS_ORIGINS
         value: '["https://nyayaai-web.onrender.com"]'
+      # Google Gemini through its OpenAI-compatible API. GENERATOR_API_KEY is entered in the
+      # dashboard and is also used for embeddings unless EMBEDDING_API_KEY is set.
       - key: GENERATOR_PROVIDER
         value: openai
       - key: GENERATOR_MODEL
-        value: gpt-4o-mini
+        value: gemini-2.0-flash
       - key: GENERATOR_API_BASE_URL
-        value: https://api.openai.com/v1
+        value: https://generativelanguage.googleapis.com/v1beta/openai
       - key: GENERATOR_API_KEY
         sync: false
       - key: INITIAL_ADMIN_USERNAME
@@ -39,12 +41,20 @@ services:
         value: data/processed/chunks.jsonl
       - key: DATA_DOCUMENTS_PATH
         value: data/processed/documents.jsonl
-      # Dense/hybrid need the 'dense' extra (Docker build arg EXTRAS=dense) and more memory
-      # than the free plan provides; the free instance serves BM25 only.
+      # Dense/hybrid use an embeddings API (no PyTorch on the instance). The corpus is
+      # embedded once in the background and stored in PostgreSQL; /ready shows progress.
       - key: ENABLED_RETRIEVERS
-        value: '["bm25"]'
+        value: '["bm25","dense","hybrid"]'
+      - key: EMBEDDING_PROVIDER
+        value: openai
       - key: EMBEDDING_MODEL
-        value: sentence-transformers/all-MiniLM-L6-v2
+        value: gemini-embedding-001
+      - key: EMBEDDING_DIMENSIONS
+        value: "768"
+      - key: EMBEDDING_BATCH_SIZE
+        value: "50"
+      - key: EMBEDDING_REQUESTS_PER_MINUTE
+        value: "30"
       - key: RATE_LIMIT_PER_MINUTE
         value: "120"
       - key: AUTH_RATE_LIMIT_PER_MINUTE

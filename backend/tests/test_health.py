@@ -18,3 +18,8 @@ def test_production_configuration_problems_are_detected() -> None:
         database_url="postgresql://user:pw@db/nyaya",
     )
     assert safe.production_problems() == []
+
+
+def test_empty_embedding_dimensions_is_treated_as_unset() -> None:
+    assert Settings(_env_file=None, embedding_dimensions="").embedding_dimensions is None
+    assert Settings(_env_file=None, embedding_dimensions="768").embedding_dimensions == 768
