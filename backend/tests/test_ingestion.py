@@ -152,3 +152,57 @@ def test_ingestion_cli_writes_processed_corpus_and_statistics(tmp_path: Path) ->
     assert json.loads(stats_path.read_text(encoding="utf-8"))["documents_by_court"] == {"SC": 1}
     assert (processed_path / "documents.jsonl").exists()
     assert (processed_path / "chunks.jsonl").exists()
+
+
+def test_judgment_header_metadata_is_extracted_only_when_present() -> None:
+    from backend.app.services.ingestion.metadata import enrich_document, judgment_header_metadata
+
+    header = (
+        "A v B\nSupreme Court of India\n26 September 1973\nWrit Petition No. 117 of 1973\nText."
+    )
+    assert judgment_header_metadata(header) == {
+        "judgment_date": "1973-09-26",
+        "year": 1973,
+        "case_number": "Writ Petition No. 117 of 1973",
+    }
+    no_number = "A v B\nSupreme Court of India\n8 July 2010\nThe Judgment was delivered by: X, J."
+    assert "case_number" not in judgment_header_metadata(no_number)
+    assert judgment_header_metadata("No header here") == {}
+    statute = enrich_document(
+        LegalDocument("S1", "26 September 1973", "aila", {"document_type": "statute"})
+    )
+    assert "judgment_date" not in statute.metadata
+    assert len(statute.metadata["content_sha256"]) == 64
+
+
+def test_ingestion_is_repeatable_and_reports_skipped_records(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw.jsonl"
+    records = [
+        {"id": "C1", "text": "First judgment text."},
+        {"id": "C1", "text": "A conflicting duplicate record."},
+        {"id": "C2", "text": "First judgment text."},
+    ]
+    raw_path.write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
+    processed_path = tmp_path / "processed"
+    config_path = tmp_path / "data.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "corpus:",
+                "  source: ildc",
+                f"  input_path: {raw_path.as_posix()}",
+                "paths:",
+                f"  processed_dir: {processed_path.as_posix()}",
+                f"  statistics_path: {(tmp_path / 'stats.json').as_posix()}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    first = run_ingestion(config_path)["ingestion_report"]
+    assert first["input_records"] == 3
+    assert first["skipped_duplicate_ids"] == ["C1"]
+    assert first["removed_duplicate_texts"] == 1
+    assert first["documents_written"] == 1
+    output = (processed_path / "documents.jsonl").read_text(encoding="utf-8")
+    run_ingestion(config_path)
+    assert (processed_path / "documents.jsonl").read_text(encoding="utf-8") == output

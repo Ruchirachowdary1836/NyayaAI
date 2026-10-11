@@ -74,3 +74,27 @@ describe('API startup recovery', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('API client errors', () => {
+  it('does not retry a non-idempotent request that timed out', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"detail":"timed out"}', { status: 504 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(fetchApi('http://localhost:8000/api/v1/qa', { method: 'POST' })).resolves.toHaveProperty('status', 504);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns validation errors into readable messages and reports expired sessions', async () => {
+    const { api, onUnauthorized, tokenStore } = await import('./api');
+    tokenStore.set('expired');
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: [{ loc: ['body', 'query'], msg: 'Query must contain text' }] }), { status: 422 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: 'Invalid or expired access token' }), { status: 401 })));
+    await expect(api.search({ query: ' ', retriever: 'bm25' })).rejects.toThrow('query: Query must contain text');
+    await expect(api.me()).rejects.toMatchObject({ status: 401, message: 'Invalid or expired access token' });
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    tokenStore.clear();
+  });
+});

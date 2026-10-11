@@ -33,3 +33,23 @@ NyayaAI uses a strict, reproducible evaluation workflow for retrieval and answer
 2. Set corpus/query/qrels paths and fixed run parameters in `configs/experiment.yaml`.
 3. Run `make experiment`; generated legal text remains gitignored.
 4. The dashboard reads generated metrics files without synthesizing missing results. The hosted BM25 seed run is produced by `evaluation.seed_aila_benchmark`; dense/hybrid scores require an actual full experiment.
+
+## Measured three-engine comparison (2026-10-11)
+
+Run through the platform's experiment API (`POST /api/v1/experiments/runs`) on the full ingested
+AILA 2019 corpus (3,111 documents, 24,178 chunks), all 50 official prior-case queries with their
+binary relevance judgments, k = 10 documents per query (best passage per document from a 40-chunk
+pool). Dense used `sentence-transformers/all-MiniLM-L6-v2`; hybrid used RRF (k = 60).
+
+| Engine | MAP | MRR | nDCG@10 | Recall@10 |
+|---|---|---|---|---|
+| BM25 | 0.0886 | 0.1576 | 0.1227 | 0.1443 |
+| Dense (MiniLM) | 0.0467 | 0.0850 | 0.0680 | 0.0795 |
+| Hybrid (RRF) | 0.0569 | 0.1033 | 0.0733 | 0.0773 |
+
+BM25 agrees with the recorded offline baseline (MAP 0.0854; the small difference comes from the
+document-level pooling protocol). The small general-purpose embedding model, which reads only the
+first 256 word pieces of each chunk, underperforms lexical matching on AILA's long fact-pattern
+queries, and RRF fusion with it does not recover BM25's quality. A legal-domain or longer-context
+embedding model is needed before dense or hybrid retrieval should be preferred on this task.
+These figures are from a single run with no significance testing.

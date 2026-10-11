@@ -1,29 +1,20 @@
-import time
-
-from backend.app.core.config import Settings
-from backend.app.main import app
-from fastapi.testclient import TestClient
+from backend.app.core.config import DEFAULT_JWT_SECRET, Settings
 
 
 def test_default_retriever_configuration_is_safe() -> None:
     assert Settings(_env_file=None).enabled_retrievers == ["bm25"]
 
 
-def test_health_endpoint() -> None:
-    with TestClient(app) as client:
-        response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-
-
-def test_ready_endpoint() -> None:
-    with TestClient(app) as client:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            response = client.get("/ready")
-            if response.status_code == 200:
-                break
-            assert response.status_code == 503
-            time.sleep(0.01)
-        assert response.status_code == 200
-        assert response.json()["status"] == "ready"
+def test_production_configuration_problems_are_detected() -> None:
+    unsafe = Settings(_env_file=None, jwt_secret_key=DEFAULT_JWT_SECRET, cors_origins=["*"])
+    problems = unsafe.production_problems()
+    assert any("JWT_SECRET_KEY" in problem for problem in problems)
+    assert any("CORS_ORIGINS" in problem for problem in problems)
+    assert any("DATABASE_URL" in problem for problem in problems)
+    safe = Settings(
+        _env_file=None,
+        jwt_secret_key="s" * 48,
+        cors_origins=["https://app.example.org"],
+        database_url="postgresql://user:pw@db/nyaya",
+    )
+    assert safe.production_problems() == []

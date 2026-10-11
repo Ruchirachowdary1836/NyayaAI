@@ -34,3 +34,15 @@ This document captures the default choices made during Phase 0 and later phases 
 4. Docker Compose uses PostgreSQL for auth and feedback; direct local development and tests default to file-backed SQLite.
 5. Authentication uses salted PBKDF2-HMAC-SHA256 password hashes, signed role-bearing JWTs, user-only self-registration, and an administrator provisioned by environment variables.
 6. The UI shares a typed API client and presents an explicit empty-index state rather than seeding synthetic or unlicensed case law.
+
+## Platform completion decisions (2026-10)
+
+1. **Schema migrations.** Alembic owns the schema. Revision `0001_baseline` adopts databases created by the earlier `create_all` path without altering data; `0002_platform_tables` adds account status, token revocation, user documents, experiments, and usage events. Migrations run automatically (idempotently) at API startup and via `alembic upgrade head`.
+2. **Usernames stay the user primary key** for compatibility with existing deployments. Foreign keys use `ON UPDATE CASCADE` so renames carry owned rows; SQLite enforces them via `PRAGMA foreign_keys=ON`.
+3. **Bearer tokens, not cookies.** The static site and API are on different `onrender.com` subdomains, which browsers treat as cross-site, so cookie sessions would be unreliable. Tokens are short-lived JWTs with `jti`/`iat`; logout revokes the `jti`, and password/role/status changes invalidate every earlier token through `tokens_valid_after`.
+4. **All `/api/v1` data routes require authentication**, including search, so expensive retrieval and generation are attributable and rate-limited. `/health` and `/ready` stay public.
+5. **Uploads live in the database** (bytes and extracted text), because Render's disk is ephemeral. Files are limited to 5 MB and validated by content (PDF signature, UTF-8 text without binary signatures), not by extension.
+6. **No silent fallbacks.** A dense model that cannot load is reported as `failed`; compare and experiments list unavailable engines instead of substituting BM25; generation failures map to explicit 502/503/504 errors.
+7. **Usage analytics are anonymized**: event type, engine, outcome, result count, and latency only — never query text.
+8. **Grounding enforcement.** Common citation variants (`[1, 2]`, `[Passage 1]`) are normalized before auditing; answers with invalid or no citations are withheld, and interpretation is separated from sourced text.
+9. **Dependencies split into extras** (`dense`, `tracking`, `dev`) so the default API image does not ship PyTorch, MLflow, or unused packages.

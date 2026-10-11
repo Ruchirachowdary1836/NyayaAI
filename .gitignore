@@ -49,3 +49,6 @@ coverage.xml
 
 # Docker local overrides
 compose.override.yml
+
+# Local tooling
+.claude/

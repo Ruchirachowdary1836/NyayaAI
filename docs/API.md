@@ -1,33 +1,79 @@
 # API reference
 
-The FastAPI service publishes its interactive OpenAPI reference at `/docs` and its schema at `/openapi.json`.
+Interactive OpenAPI documentation is served at `/docs` (Swagger UI) and `/redoc`; the schema is at
+`/openapi.json`.
+
+## Conventions
+
+- Base path: `/api/v1`. Every route below except `auth/register` and `auth/token` requires
+  `Authorization: Bearer <access_token>`.
+- Errors return `{"detail": ...}`. Validation errors (HTTP 422) return FastAPI's list of
+  `{loc, msg}` items. Unexpected errors return HTTP 500 with a generic message and `request_id`.
+- Every response carries `X-Request-ID` (a valid client-supplied ID is echoed back).
+- Status codes: 401 missing/invalid/expired/revoked token · 403 insufficient role · 404 missing
+  or not owned (private resources never reveal existence) · 409 conflict · 413 upload too large ·
+  422 validation · 429 rate limited (`Retry-After`) · 502/503/504 dependency failure.
+
+## Health
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | Liveness; available during startup. |
+| GET | `/ready` | Readiness: `status`, `database`, corpus counts, `available_retrievers`, per-engine `retrievers` state (`ready`, `not_loaded`, `loading`, `failed`, `disabled`), generation provider/model/configured. 503 while initializing or if the database is unreachable. |
+
+## Authentication
+
+| Method | Path | Body / notes |
+|---|---|---|
+| POST | `/auth/register` | `{username, password}`; username `[A-Za-z0-9_.-]{3,80}`, password ≥ 8. Returns a token (201). Rate limited per IP. |
+| POST | `/auth/token` | `{username, password}` → `{access_token, token_type, role, username, expires_in}`. Rate limited per IP. |
+| POST | `/auth/logout` | Revokes the presented token (204). |
+| GET | `/auth/me` | Profile: username, role, is_active, created_at, last_login_at. |
+| PUT | `/auth/me` | `{current_password, username, new_password?}`; returns a new token. A password change signs out all other sessions. |
 
 ## Research
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/search` | Search with `bm25`, `dense`, or `hybrid`; returns passage text, rank, and source scores. |
-| `POST` | `/api/v1/compare` | Run one query through all three retrievers and report document-set overlap. |
-| `POST` | `/api/v1/qa` | Answer from retrieved passages; always returns citations, audit flags, confidence, and disclaimer. |
-| `GET` | `/api/v1/qa/stream` | Stream generated tokens via SSE (`token`, `complete`, `refusal`, or `error` events). |
-| `GET` | `/api/v1/documents` | List indexed document metadata and short excerpts. |
-| `GET` | `/api/v1/documents/{document_id}` | Fetch the full document and its chunk offsets. |
-| `GET` | `/api/v1/experiments` | List completed runs in `evaluation/results/`. |
-| `GET` | `/api/v1/experiments/{run_id}` | Read metrics for one validated run ID. |
-| `POST` | `/api/v1/feedback` | Record an optional correctness score and helpfulness rating. |
+| GET | `/dashboard` | The caller's library/experiment counts, recent items, 30-day activity, corpus and engine status. |
+| POST | `/search` | `{query, retriever: bm25\|dense\|hybrid, k (page size ≤ 50), page ≤ 10, document_type?, court?, year_from?, year_to?, group_by_document=true, sort: relevance\|newest\|oldest\|title\|document}` → hits with `title`, `excerpt`, full passage `text`, scores, metadata; `total`, `total_is_capped`, `latency_ms`. |
+| POST | `/compare` | `{query, k ≤ 20, retrievers?}` → per-engine top-k documents (best passage each) and latency, Jaccard document overlap, and `unavailable` engines with reasons. |
+| POST | `/qa` | `{query, retriever, k ≤ 20, query_type}` → `answer`, `citations`, `invalid_citations`, `unsupported_sentences`, `interpretation`, `passages` (with doc IDs/titles/metadata), `confidence`, `refused`, `refusal_reason` (`no_evidence`, `insufficient_evidence`, `invalid_citations`, `uncited_answer`), `disclaimer`, `model`, `provider`. Rate limited per user. |
+| POST | `/qa/stream` | Same body; server-sent events `token`, then `complete` (audited payload), `refusal`, or `error`. The question is sent in the body, never the URL. |
+| POST | `/feedback` | `{query, rating: up\|down, correctness?, comment?}`. |
 
-Search and QA bodies contain `query`, a retriever name, and `k`. QA also accepts `query_type`: `auto`, `statute_lookup`, `conceptual`, or `fact_pattern`. Invalid inputs return standard FastAPI validation responses. Dense and hybrid retrieval require the configured sentence-transformer model. Local QA uses Ollama; Render QA uses the configured OpenAI-compatible provider. Render requires `GENERATOR_API_KEY`; absent credentials or provider failures are surfaced, never replaced with mock answers.
+## Corpus
 
-## Authentication and administration
+| Method | Path | Description |
+|---|---|---|
+| GET | `/documents` | `q`, `document_type`, `court`, `sort=id\|title`, `limit ≤ 100`, `offset` → summaries and `facets`. |
+| GET | `/documents/{doc_id}` | Full text, metadata (court, judgment date, case number, source, licence), and chunk offsets. |
 
-- `POST /api/v1/auth/register` accepts a username and password (minimum 8 characters) and creates a `user` account.
-- `POST /api/v1/auth/token` exchanges JSON username/password credentials for a signed JWT bearer token.
-- `GET /api/v1/auth/me` returns the authenticated username and role.
-- `PUT /api/v1/auth/me` updates the username and/or password after confirming the current password. It returns a replacement JWT and invalidates the old username-bound token.
-- `GET /api/v1/admin/overview` and `GET /api/v1/admin/users` require the `admin` role.
-- Bootstrap an initial administrator using `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD` before the backend's first start. The initial account is created only if that username does not already exist.
-- Passwords are salted and hashed with PBKDF2-HMAC-SHA256. Use a unique high-entropy `JWT_SECRET_KEY` outside local development.
+## Private document library
 
-Every request receives an `X-Request-ID` response header. A process-local per-client sliding-window limiter defaults to 120 requests per minute and responds with HTTP 429 when exceeded. CORS is restricted to local Vite origins by default. In Compose, PostgreSQL stores accounts and feedback; direct local development defaults to SQLite. The single-process limiter is for local research; deploy behind production identity and a shared limiter for multi-instance use.
+| Method | Path | Description |
+|---|---|---|
+| POST | `/library/documents` | Multipart `file` (PDF, TXT, MD; ≤ 5 MB) and optional `title`. Content is validated and text extracted; `status` is `ready` or `failed` with `error`. Duplicate files → 409. |
+| GET | `/library/documents` | Caller's documents; `q`, `status`, `limit`, `offset`. |
+| GET | `/library/documents/{id}` | Metadata and extracted text. |
+| GET | `/library/documents/{id}/download` | Original bytes as an attachment. |
+| DELETE | `/library/documents/{id}` | Permanently deletes the document (204). |
+| POST | `/library/search` | `{query, k}` → BM25 matches within the caller's ready documents. |
 
-All QA payloads include the assistive-use disclaimer. Unsupported and invalid model citations are explicitly reported; answers containing nonexistent passage indices are withheld.
+## Experiments
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/experiments/runs` | `{name, retrievers[], k ≤ 50, queries: [{query ≤ 8,000 chars, relevant_doc_ids[]}]}` (≤ 25 queries). Runs real searches, stores document rankings, latency, and — for judged queries — precision/recall@k, MAP, MRR, nDCG@10. |
+| GET | `/experiments/runs` | Caller's runs (paginated). |
+| GET/DELETE | `/experiments/runs/{id}` | Full results / delete. |
+| GET | `/experiments/benchmarks` | Offline benchmark runs from `evaluation/results` (e.g. the AILA 2019 BM25 baseline). |
+| GET | `/experiments/benchmarks/{run_id}` | One benchmark run. |
+
+## Administration (admin role)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/admin/overview` | Users, uploads, experiments, feedback, anonymized usage (24 h / 7 d), engine state, ingestion report, database/schema/provider status. |
+| GET | `/admin/users` | `q`, `limit`, `offset`. |
+| PATCH | `/admin/users/{username}` | `{role?, is_active?}`. Admins cannot demote or disable themselves, and the last active admin cannot be removed. Changes end the user's existing sessions. |
