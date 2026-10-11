@@ -10,12 +10,17 @@ services:
     envVars:
       - key: APP_ENV
         value: production
+      - key: LOG_LEVEL
+        value: INFO
       - key: DATABASE_URL
         fromDatabase:
           name: nyayaai-db
           property: connectionString
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      # Must list the static site's public origin exactly (scheme + host, no trailing slash).
       - key: CORS_ORIGINS
         value: '["https://nyayaai-web.onrender.com"]'
       - key: GENERATOR_PROVIDER
@@ -34,10 +39,20 @@ services:
         value: data/processed/chunks.jsonl
       - key: DATA_DOCUMENTS_PATH
         value: data/processed/documents.jsonl
-      - key: EMBEDDING_MODEL
-        value: sentence-transformers/all-MiniLM-L6-v2
+      # Dense/hybrid need the 'dense' extra (Docker build arg EXTRAS=dense) and more memory
+      # than the free plan provides; the free instance serves BM25 only.
       - key: ENABLED_RETRIEVERS
         value: '["bm25"]'
+      - key: EMBEDDING_MODEL
+        value: sentence-transformers/all-MiniLM-L6-v2
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "120"
+      - key: AUTH_RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: QA_RATE_LIMIT_PER_MINUTE
+        value: "10"
+      - key: UPLOAD_MAX_BYTES
+        value: "5242880"
 
   - type: web
     name: nyayaai-web
@@ -46,8 +61,19 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist
     envVars:
+      # Must match the API service's public URL; update it if Render assigns a different host.
       - key: VITE_API_BASE_URL
         value: https://nyayaai-api-k9l9.onrender.com
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
     routes:
       - type: rewrite
         source: /*

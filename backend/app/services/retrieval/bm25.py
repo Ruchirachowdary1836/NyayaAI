@@ -10,6 +10,9 @@ from backend.app.services.ingestion.chunker import LegalChunk
 from backend.app.services.retrieval.base import Hit, legal_tokenize
 
 
+_MIN_IDF = 0.01
+
+
 class BM25Retriever:
     name = "bm25"
 
@@ -49,7 +52,9 @@ class BM25Retriever:
             idf_total += idf
 
         average_idf = idf_total / len(self._idf)
-        floor_idf = 0.25 * average_idf
+        # In tiny collections (e.g. a user's private library) every term can have a negative
+        # IDF, making the average negative too; keep the floor positive so matches score > 0.
+        floor_idf = max(0.25 * average_idf, _MIN_IDF)
         for term, idf in self._idf.items():
             if idf < 0:
                 self._idf[term] = floor_idf

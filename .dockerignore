@@ -18,3 +18,7 @@ data/indices
 evaluation/results
 mlruns
 wandb
+.env.*
+!.env.example
+.claude
+frontend/.env.local

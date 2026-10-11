@@ -181,7 +181,7 @@ def test_registry_initializes_dense_engine_once_for_concurrent_requests(monkeypa
     calls = 0
 
     class FakeDense:
-        def __init__(self, chunks, model_name) -> None:
+        def __init__(self, chunks, model_name, **kwargs) -> None:
             nonlocal calls
             calls += 1
             time.sleep(0.02)
@@ -197,3 +197,72 @@ def test_registry_initializes_dense_engine_once_for_concurrent_requests(monkeypa
 
     assert calls == 1
     assert all(retriever is retrievers[0] for retriever in retrievers)
+
+
+def test_dense_embeddings_are_cached_and_reused(tmp_path) -> None:
+    calls = []
+
+    def encoder(texts):
+        calls.append(len(texts))
+        return np.array([[float(len(text)), 1.0] for text in texts])
+
+    chunks = [chunk("a", "short text"), chunk("b", "a much longer passage of text")]
+    first = DenseRetriever(chunks, model_name="test-model", encoder=encoder, cache_dir=tmp_path)
+    assert first.loaded_from_cache is False and first.cache_path.is_file()
+    second = DenseRetriever(chunks, model_name="test-model", encoder=encoder, cache_dir=tmp_path)
+    assert second.loaded_from_cache is True
+    assert calls == [
+        2,
+    ]  # The corpus was embedded once; the second load reused the cache.
+    changed = DenseRetriever(
+        [chunk("a", "edited text"), chunks[1]],
+        model_name="test-model",
+        encoder=encoder,
+        cache_dir=tmp_path,
+    )
+    assert changed.loaded_from_cache is False
+
+
+def test_registry_reports_dense_load_failure_explicitly(monkeypatch) -> None:
+    from backend.app.services.retrieval import registry as registry_module
+
+    def broken(*args, **kwargs):
+        raise OSError("model download failed")
+
+    monkeypatch.setattr(registry_module, "DenseRetriever", broken)
+    registry = RetrieverRegistry(
+        [chunk("a", "text")], enabled_retrievers=["bm25", "dense", "hybrid"]
+    )
+    with pytest.raises(RuntimeError, match="Dense retrieval is unavailable"):
+        registry.get("hybrid")
+    assert registry.status()["dense"]["state"] == "failed"
+    assert registry.get("bm25").search("text")
+
+
+def test_filtered_search_widens_the_candidate_pool() -> None:
+    from backend.app.services.retrieval.search import SearchFilters, run_search
+
+    chunks = [
+        LegalChunk(
+            f"C{i}", f"C{i}:0", "murder appeal murder", 0, 20, 3, {"document_type": "judgment"}
+        )
+        for i in range(150)
+    ] + [LegalChunk("S1", "S1:0", "murder", 0, 6, 1, {"document_type": "statute"})]
+    registry = RetrieverRegistry(chunks, enabled_retrievers=["bm25"])
+    page = run_search(registry, "bm25", "murder", SearchFilters(document_type="statute"))
+    assert [hit.doc_id for hit in page.hits] == ["S1"]
+
+
+def test_best_excerpt_centres_on_query_terms() -> None:
+    from backend.app.services.retrieval.search import best_excerpt
+
+    text = "filler " * 200 + "the doctrine of res judicata applies" + " filler" * 200
+    excerpt = best_excerpt(text, "res judicata", width=120)
+    assert "res judicata" in excerpt
+    assert excerpt.startswith("…") and excerpt.endswith("…")
+
+
+def test_bm25_scores_are_positive_for_single_document_collections() -> None:
+    results = BM25Retriever([chunk("only", "notice period landlord")]).search("landlord notice")
+    assert len(results) == 1
+    assert results[0].score > 0

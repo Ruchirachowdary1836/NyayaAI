@@ -1,161 +1,137 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
+from typing import Annotated, Any
 
-from backend.app.schemas.retrieval import PassageResponse, QARequest, QAResponse
-from backend.app.services.explain.confidence import confidence_score
-from backend.app.services.generation.citation_checker import audit_citations
-from backend.app.services.generation.llm import OllamaGenerator, OpenAICompatibleGenerator
-from backend.app.services.generation.prompts import DISCLAIMER, build_prompt
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from backend.app.api.deps import limit_generation, record_usage
+from backend.app.api.v1.search import retrieval_error
+from backend.app.core.config import settings
+from backend.app.schemas.retrieval import QARequest, QAResponse
+from backend.app.services.generation.llm import GenerationError
+from backend.app.services.generation.pipeline import (
+    PreparedQuestion,
+    finalize_answer,
+    prepare_question,
+    refusal_payload,
+)
+
 router = APIRouter(prefix="/qa", tags=["qa"])
+GenerationUser = Annotated[dict[str, Any], Depends(limit_generation)]
 
 
-def _prepare(request: Request, query: str, retriever_name: str, k: int):
+def _require_generator(request: Request):
+    generator = request.app.state.generator
+    if not getattr(generator, "configured", True):
+        # Explicit configuration error; retrieval-only features keep working.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "AI answer generation is not configured. Set GENERATOR_API_KEY in the API "
+                "service. Search and document review remain available."
+            ),
+        )
+    return generator
+
+
+def _retrieve(request: Request, payload: QARequest, username: str) -> PreparedQuestion | None:
     registry = request.app.state.retrievers
     try:
-        hits = registry.get(retriever_name).search(query, k)
+        hits = registry.get(payload.retriever).search(payload.query, max(payload.k, 5))
     except (ValueError, RuntimeError) as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    return hits
-
-
-@router.post("", response_model=QAResponse)
-async def answer(payload: QARequest, request: Request) -> QAResponse:
-    hits = _prepare(request, payload.query, payload.retriever, payload.k)
+        record_usage(request, username, "qa", "error", retriever=payload.retriever)
+        raise retrieval_error(error) from error
     if not hits:
-        refusal = "The available corpus contains no passages relevant to this question."
-        return QAResponse(
-            query=payload.query,
-            answer=refusal,
-            citations=[],
-            invalid_citations=[],
-            unsupported_sentences=[],
-            passages=[],
-            confidence=0.0,
-            disclaimer=DISCLAIMER,
-            refused=True,
-        )
-
-    generator = request.app.state.generator
-    try:
-        answer_text = await generator.generate(
-            build_prompt(
-                payload.query,
-                [hit.text for hit in hits[:5]],
-                payload.query_type,
-            )
-        )
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-
-    audit = audit_citations(answer_text, min(len(hits), 5))
-    citations = list(dict.fromkeys(audit.valid_citations))
-    passages = [
-        PassageResponse(
-            index=index,
-            doc_id=hit.doc_id,
-            chunk_id=hit.chunk_id,
-            text=hit.text,
-            score=hit.score,
-            source_scores=hit.source_scores,
-        )
-        for index, hit in enumerate(hits[:5], start=1)
-    ]
-    invalid_reference = bool(audit.invalid_citations)
-    return QAResponse(
-        query=payload.query,
-        answer=(
-            "The generated answer contained a reference to a passage that was not provided. "
-            "It has been withheld; review the retrieved passages directly."
-            if invalid_reference
-            else answer_text
-        ),
-        citations=citations,
-        invalid_citations=list(audit.invalid_citations),
-        unsupported_sentences=list(audit.unsupported_sentences),
-        passages=passages,
-        confidence=confidence_score(hits, citations),
-        disclaimer=DISCLAIMER,
-        refused=invalid_reference,
+        return None
+    return prepare_question(
+        payload.query, hits, payload.query_type, passage_chars=settings.qa_passage_chars
     )
 
 
-@router.get("/stream")
+def _model_fields(generator) -> dict[str, str | None]:
+    return {
+        "model": getattr(generator, "model", None),
+        "provider": getattr(generator, "provider", settings.generator_provider),
+    }
+
+
+@router.post("", response_model=QAResponse)
+async def answer(payload: QARequest, request: Request, user: GenerationUser) -> QAResponse:
+    generator = _require_generator(request)
+    started = time.perf_counter()
+    prepared = _retrieve(request, payload, user["username"])
+    if prepared is None:
+        record_usage(request, user["username"], "qa", "no_evidence", retriever=payload.retriever)
+        return QAResponse(**refusal_payload(payload.query), **_model_fields(generator))
+    try:
+        answer_text = await generator.generate(prepared.prompt)
+    except GenerationError as error:
+        record_usage(request, user["username"], "qa", error.kind, retriever=payload.retriever)
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+    result = finalize_answer(prepared, answer_text)
+    record_usage(
+        request,
+        user["username"],
+        "qa",
+        result["refusal_reason"] or "ok",
+        retriever=payload.retriever,
+        result_count=len(result["citations"]),
+        latency_ms=(time.perf_counter() - started) * 1000,
+    )
+    return QAResponse(**result, **_model_fields(generator))
+
+
+def _event(name: str, data: dict[str, Any]) -> str:
+    return f"event: {name}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.post("/stream")
 async def stream_answer(
-    request: Request,
-    query: str = Query(min_length=1, max_length=4000),
-    retriever: str = Query(default="bm25", pattern="^(bm25|dense|hybrid)$"),
-    k: int = Query(default=10, ge=1, le=100),
-    query_type: str = Query(
-        default="auto", pattern="^(auto|statute_lookup|conceptual|fact_pattern)$"
-    ),
+    payload: QARequest, request: Request, user: GenerationUser
 ) -> StreamingResponse:
-    hits = _prepare(request, query, retriever, k)
+    """Stream tokens as server-sent events, then a final audited ``complete`` event.
+
+    The question is sent in the JSON body (not the URL) so it never appears in access logs.
+    """
+    generator = _require_generator(request)
+    started = time.perf_counter()
+    prepared = _retrieve(request, payload, user["username"])
+    model_fields = _model_fields(generator)
 
     async def events() -> AsyncIterator[str]:
-        if not hits:
-            yield (
-                "event: refusal\ndata: "
-                + json.dumps(
-                    {
-                        "query": query,
-                        "answer": "The available corpus contains no passages relevant to this question.",
-                        "citations": [],
-                        "invalid_citations": [],
-                        "unsupported_sentences": [],
-                        "passages": [],
-                        "confidence": 0.0,
-                        "disclaimer": DISCLAIMER,
-                        "refused": True,
-                    }
-                )
-                + "\n\n"
+        if prepared is None:
+            record_usage(
+                request, user["username"], "qa", "no_evidence", retriever=payload.retriever
             )
+            yield _event("refusal", {**refusal_payload(payload.query), **model_fields})
             return
-        generator: OllamaGenerator | OpenAICompatibleGenerator = request.app.state.generator
+        fragments: list[str] = []
         try:
-            prompt = build_prompt(query, [hit.text for hit in hits[:5]], query_type)
-            fragments: list[str] = []
-            async for token in generator.stream(prompt):
+            async for token in generator.stream(prepared.prompt):
                 fragments.append(token)
-                yield f"event: token\ndata: {json.dumps({'token': token})}\n\n"
-            complete = "".join(fragments)
-            audit = audit_citations(complete, min(len(hits), 5))
-            valid_citations = list(dict.fromkeys(audit.valid_citations))
-            invalid_reference = bool(audit.invalid_citations)
-            passages = [
-                PassageResponse(
-                    index=index,
-                    doc_id=hit.doc_id,
-                    chunk_id=hit.chunk_id,
-                    text=hit.text,
-                    score=hit.score,
-                    source_scores=hit.source_scores,
-                ).model_dump()
-                for index, hit in enumerate(hits[:5], start=1)
-            ]
-            yield (
-                "event: complete\ndata: "
-                + json.dumps(
-                    {
-                        "query": query,
-                        "answer": complete,
-                        "citations": valid_citations,
-                        "invalid_citations": list(audit.invalid_citations),
-                        "unsupported_sentences": list(audit.unsupported_sentences),
-                        "disclaimer": DISCLAIMER,
-                        "passages": passages,
-                        "confidence": confidence_score(hits, valid_citations),
-                        "refused": invalid_reference,
-                    }
-                )
-                + "\n\n"
-            )
-        except RuntimeError as error:
-            yield f"event: error\ndata: {json.dumps({'detail': str(error)})}\n\n"
+                yield _event("token", {"token": token})
+        except GenerationError as error:
+            record_usage(request, user["username"], "qa", error.kind, retriever=payload.retriever)
+            yield _event("error", {"detail": str(error), "kind": error.kind})
+            return
+        result = finalize_answer(prepared, "".join(fragments))
+        record_usage(
+            request,
+            user["username"],
+            "qa",
+            result["refusal_reason"] or "ok",
+            retriever=payload.retriever,
+            result_count=len(result["citations"]),
+            latency_ms=(time.perf_counter() - started) * 1000,
+        )
+        yield _event("complete", {**result, **model_fields})
 
-    return StreamingResponse(events(), media_type="text/event-stream")
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

@@ -3,15 +3,34 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import { ToastProvider } from './components/Toast';
+import { ApiError } from './lib/api';
+import { AuthProvider } from './lib/auth';
+import { ThemeProvider } from './lib/theme';
 import './styles/index.css';
+import './styles/app.css';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Client errors (4xx) will not succeed on retry; transient errors are retried inside fetchApi.
+      retry: (failureCount, error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <ThemeProvider>
+          <ToastProvider>
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          </ToastProvider>
+        </ThemeProvider>
       </QueryClientProvider>
     </BrowserRouter>
   </React.StrictMode>,

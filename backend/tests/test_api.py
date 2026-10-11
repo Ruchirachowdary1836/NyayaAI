@@ -1,321 +1,356 @@
 from __future__ import annotations
 
-import json
-import time
-from pathlib import Path
+import threading
 
 import pytest
-from backend.app.api.v1.feedback import initialize_feedback_store
-from backend.app.core.security import create_access_token
+from backend.app.core.config import settings
 from backend.app.main import app
-from backend.app.services.auth import create_user, initialize_auth_store
-from backend.app.services.ingestion.chunker import LegalChunk
+from backend.app.services.generation.llm import GenerationError, OpenAICompatibleGenerator
 from backend.app.services.retrieval.registry import RetrieverRegistry
+from conftest import StubGenerator, register, wait_until_ready
 from fastapi.testclient import TestClient
 
 
-def _wait_until_ready(client: TestClient) -> None:
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        response = client.get("/ready")
-        if response.status_code == 200:
-            return
-        assert response.status_code == 503, response.text
-        time.sleep(0.01)
-    raise AssertionError("Application did not become ready within 10 seconds")
+def test_health_ready_request_id_and_security_headers(client) -> None:
+    assert client.get("/health").json() == {"status": "ok"}
+    ready = client.get("/ready").json()
+    assert ready["status"] == "ready"
+    assert ready["database"] == "ok"
+    assert ready["corpus_documents"] == 3
+    assert ready["retrievers"]["dense"] == {"state": "disabled"}
+    response = client.get("/health", headers={"X-Request-ID": "trace-123"})
+    assert response.headers["x-request-id"] == "trace-123"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    unsafe = client.get("/health", headers={"X-Request-ID": "bad id\r\nInjected: 1"})
+    assert unsafe.headers["x-request-id"] != "bad id\r\nInjected: 1"
 
 
-def test_search_qa_document_feedback_and_request_id(tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        _wait_until_ready(client)
-        text = "Section 482 CrPC permits the High Court to exercise inherent powers."
-        app.state.retrievers = RetrieverRegistry(
-            [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))],
-            enabled_retrievers=["bm25"],
-        )
-        app.state.documents_path = tmp_path / "documents.jsonl"
-        app.state.documents_path.write_text(
-            json.dumps({"doc_id": "case-1", "text": text, "source": "test", "metadata": {}}) + "\n",
-            encoding="utf-8",
-        )
-        app.state.feedback_db = tmp_path / "feedback.db"
-        initialize_feedback_store(app.state.feedback_db)
-        app.state.results_dir = tmp_path / "results"
-        search_response = client.post(
-            "/api/v1/search",
-            json={"query": "Section 482 CrPC", "retriever": "bm25", "k": 5},
-            headers={"X-Request-ID": "test-request"},
-        )
-        assert search_response.status_code == 200
-        assert search_response.headers["x-request-id"] == "test-request"
-        assert search_response.json()["hits"][0]["doc_id"] == "case-1"
-
-        refusal = client.post(
-            "/api/v1/qa",
-            json={"query": "quantum mechanics", "retriever": "bm25", "k": 5},
-        )
-        assert refusal.status_code == 200
-        assert refusal.json()["refused"] is True
-        assert "not legal advice" in refusal.json()["disclaimer"]
-
-        document = client.get("/api/v1/documents/case-1")
-        assert document.status_code == 200
-        assert document.json()["document"]["doc_id"] == "case-1"
-        assert client.get("/api/v1/documents/missing").status_code == 404
-
-        feedback = client.post(
-            "/api/v1/feedback",
-            json={"query": "Section 482", "rating": "up", "correctness": 5},
-        )
-        assert feedback.status_code == 201
-        assert feedback.json()["accepted"] is True
-
-        ready = client.get("/ready")
-        assert ready.json()["corpus_documents"] == 1
-        assert ready.json()["corpus_chunks"] == 1
-        assert ready.json()["available_retrievers"] == ["bm25"]
-
-
-def test_compare_has_overlap_statistics(tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        _wait_until_ready(client)
-        app.state.retrievers = RetrieverRegistry([])
-        app.state.documents_path = tmp_path / "documents.jsonl"
-        app.state.feedback_db = tmp_path / "feedback.db"
-        app.state.results_dir = tmp_path / "results"
-        response = client.post(
-            "/api/v1/compare",
-            json={"query": "Section 482", "retriever": "bm25", "k": 3},
-        )
-
+def test_search_returns_metadata_excerpts_and_pagination(client) -> None:
+    headers = register(client)
+    response = client.post(
+        "/api/v1/search", headers=headers, json={"query": "murder Section 302", "k": 1}
+    )
     assert response.status_code == 200
-    assert response.json()["results"] == {"bm25": [], "dense": [], "hybrid": []}
-    assert all(value == 0 for value in response.json()["overlap"].values())
+    body = response.json()
+    assert body["total"] >= 2
+    assert body["page"] == 1 and len(body["hits"]) == 1
+    top = body["hits"][0]
+    assert top["title"]
+    assert "murder" in top["excerpt"].lower()
+    second = client.post(
+        "/api/v1/search", headers=headers, json={"query": "murder Section 302", "k": 1, "page": 2}
+    ).json()
+    assert second["hits"][0]["doc_id"] != top["doc_id"]
 
 
-def test_disabled_search_engines_fail_without_loading_models() -> None:
-    with TestClient(app) as client:
-        _wait_until_ready(client)
-        app.state.retrievers = RetrieverRegistry([], enabled_retrievers=["bm25"])
-        dense = client.post(
-            "/api/v1/search",
-            json={"query": "Section 482 CrPC", "retriever": "dense"},
-        )
-        comparison = client.post(
-            "/api/v1/compare",
-            json={"query": "Section 482 CrPC"},
-        )
+def test_search_filters_and_sorting(client) -> None:
+    headers = register(client)
+    statutes = client.post(
+        "/api/v1/search", headers=headers, json={"query": "murder", "document_type": "statute"}
+    ).json()
+    assert [hit["doc_id"] for hit in statutes["hits"]] == ["S1"]
+    dated = client.post(
+        "/api/v1/search",
+        headers=headers,
+        json={"query": "Section court", "year_from": 2000, "year_to": 2020},
+    ).json()
+    assert {hit["doc_id"] for hit in dated["hits"]} == {"C2"}
+    newest = client.post(
+        "/api/v1/search", headers=headers, json={"query": "Supreme Court", "sort": "newest"}
+    ).json()
+    assert [hit["doc_id"] for hit in newest["hits"]][:2] == ["C2", "C1"]
 
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"query": "   "},
+        {"query": ""},
+        {"query": "x", "k": 0},
+        {"query": "x", "k": 51},
+        {"query": "x", "retriever": "magic"},
+        {"query": "x", "year_from": 2015, "year_to": 2000},
+        {"query": "x" * 2001},
+    ],
+)
+def test_search_validation_errors(client, payload) -> None:
+    headers = register(client)
+    assert client.post("/api/v1/search", headers=headers, json=payload).status_code == 422
+
+
+def test_no_results_and_disabled_engines_are_reported(client) -> None:
+    headers = register(client)
+    empty = client.post("/api/v1/search", headers=headers, json={"query": "quantum chromodynamics"})
+    assert empty.status_code == 200
+    assert empty.json()["hits"] == [] and empty.json()["corpus_available"] is True
+    dense = client.post(
+        "/api/v1/search", headers=headers, json={"query": "murder", "retriever": "dense"}
+    )
     assert dense.status_code == 503
     assert "disabled by deployment configuration" in dense.json()["detail"]
-    assert comparison.status_code == 200
-    assert comparison.json()["results"] == {"bm25": []}
-    assert comparison.json()["overlap"] == {}
 
 
-def test_registration_login_and_admin_role_enforcement(tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        _wait_until_ready(client)
-        auth_path = tmp_path / "auth.db"
-        initialize_auth_store(auth_path)
-        app.state.auth_db = auth_path
-        registration = client.post(
-            "/api/v1/auth/register",
-            json={"username": "researcher", "password": "long-password"},
-        )
-        assert registration.status_code == 201
-        token = registration.json()["access_token"]
-        assert client.get(
-            "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}
-        ).json() == {"username": "researcher", "role": "user"}
-        assert (
-            client.get(
-                "/api/v1/admin/users", headers={"Authorization": f"Bearer {token}"}
-            ).status_code
-            == 403
-        )
-
-        login = client.post(
-            "/api/v1/auth/token",
-            json={"username": "researcher", "password": "long-password"},
-        )
-        assert login.status_code == 200
-        assert create_user(auth_path, "administrator", "long-password", role="admin")
-        admin_token = create_access_token("administrator", role="admin")
-        users = client.get(
-            "/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        assert users.status_code == 200
-        assert {user["role"] for user in users.json()} == {"user", "admin"}
+def test_compare_reports_unavailable_engines_instead_of_substituting(client) -> None:
+    headers = register(client)
+    response = client.post(
+        "/api/v1/compare",
+        headers=headers,
+        json={"query": "murder", "retrievers": ["bm25", "dense"]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert list(body["results"]) == ["bm25"]
+    assert "dense" in body["unavailable"]
+    assert body["overlap"] == {}
 
 
-def test_user_can_edit_profile_and_old_token_is_revoked(tmp_path: Path) -> None:
-    with TestClient(app) as client:
-        _wait_until_ready(client)
-        auth_path = tmp_path / "profile.db"
-        initialize_auth_store(auth_path)
-        app.state.auth_db = auth_path
-        registration = client.post(
-            "/api/v1/auth/register",
-            json={"username": "researcher", "password": "long-password"},
-        )
-        old_token = registration.json()["access_token"]
-        response = client.put(
-            "/api/v1/auth/me",
-            headers={"Authorization": f"Bearer {old_token}"},
-            json={
-                "current_password": "long-password",
-                "username": "legal-researcher",
-                "new_password": "new-long-password",
-            },
-        )
-        assert response.status_code == 200
-        new_token = response.json()["access_token"]
-        assert client.get(
-            "/api/v1/auth/me", headers={"Authorization": f"Bearer {new_token}"}
-        ).json() == {"username": "legal-researcher", "role": "user"}
-        assert (
-            client.get(
-                "/api/v1/auth/me", headers={"Authorization": f"Bearer {old_token}"}
-            ).status_code
-            == 401
-        )
-        login = client.post(
-            "/api/v1/auth/token",
-            json={"username": "legal-researcher", "password": "new-long-password"},
-        )
-        assert login.status_code == 200
-        wrong_password = client.put(
-            "/api/v1/auth/me",
-            headers={"Authorization": f"Bearer {new_token}"},
-            json={"current_password": "wrong-password", "username": "legal-researcher"},
-        )
-        assert wrong_password.status_code == 401
+def test_compare_with_dense_and_hybrid_using_injected_encoder(client) -> None:
+    import numpy as np
+    from backend.app.services.retrieval import registry as registry_module
+    from backend.app.services.retrieval.dense import DenseRetriever
 
+    vocabulary = ["murder", "section", "fir", "court", "punished"]
 
-def test_qa_stream_emits_tokens_and_audited_completion(tmp_path: Path) -> None:
-    class Generator:
-        async def stream(self, prompt: str):
-            yield "A supported statement "
-            yield "[1]."
+    def encode(texts):
+        return np.array(
+            [[text.lower().count(word) + 0.01 for word in vocabulary] for text in texts]
+        )
 
-    with TestClient(app) as client:
-        _wait_until_ready(client)
-        text = "Section 482 CrPC permits the High Court to exercise inherent powers."
+    class EncodedDense(DenseRetriever):
+        def __init__(self, chunks, model_name, **kwargs):
+            super().__init__(chunks, model_name=model_name, encoder=encode, **kwargs)
+
+    registry_module_dense = registry_module.DenseRetriever
+    registry_module.DenseRetriever = EncodedDense
+    try:
         app.state.retrievers = RetrieverRegistry(
-            [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))]
+            app.state.retrievers._chunks, enabled_retrievers=["bm25", "dense", "hybrid"]
         )
-        app.state.generator = Generator()
-        response = client.get("/api/v1/qa/stream?query=Section%20482%20CrPC&retriever=bm25")
+        headers = register(client)
+        body = client.post(
+            "/api/v1/compare", headers=headers, json={"query": "murder", "k": 3}
+        ).json()
+    finally:
+        registry_module.DenseRetriever = registry_module_dense
+    assert set(body["results"]) == {"bm25", "dense", "hybrid"}
+    assert set(body["overlap"]) == {"bm25-dense", "bm25-hybrid", "dense-hybrid"}
+    assert body["unavailable"] == {}
+    hybrid_scores = body["results"]["hybrid"][0]["source_scores"]
+    assert {"bm25_rank", "dense_rank", "fused"} <= set(hybrid_scores)
 
+
+def test_qa_returns_cited_answer_with_linked_passages(client) -> None:
+    headers = register(client)
+    response = client.post("/api/v1/qa", headers=headers, json={"query": "murder Section 302 IPC"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["refused"] is False
+    assert body["citations"] == [1]
+    assert body["passages"][0]["doc_id"] == "C1"
+    assert body["passages"][0]["title"] == "Ghana Pradhan v State of Orissa"
+    assert "not legal advice" in body["disclaimer"]
+    assert body["model"] == "stub-model"
+    # Passages are labelled with their source in the prompt.
+    assert "Source: Ghana Pradhan v State of Orissa" in app.state.generator.prompts[0]
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        ("This is supported [7].", "invalid_citations"),
+        ("Murder is always punished with death.", "uncited_answer"),
+        (
+            "The available evidence is insufficient to answer this question.",
+            "insufficient_evidence",
+        ),
+    ],
+)
+def test_qa_withholds_ungrounded_answers(client, answer, reason) -> None:
+    headers = register(client)
+    app.state.generator = StubGenerator(answer)
+    body = client.post("/api/v1/qa", headers=headers, json={"query": "murder"}).json()
+    assert body["refused"] is True
+    assert body["refusal_reason"] == reason
+    if reason != "insufficient_evidence":
+        assert answer not in body["answer"]
+    assert body["passages"]
+
+
+def test_qa_separates_interpretation_from_sourced_text(client) -> None:
+    headers = register(client)
+    app.state.generator = StubGenerator(
+        "Intention must be proved [1].\n\nInterpretation: Courts weigh circumstantial evidence."
+    )
+    body = client.post("/api/v1/qa", headers=headers, json={"query": "murder intention"}).json()
+    assert body["refused"] is False
+    assert body["interpretation"] == "Courts weigh circumstantial evidence."
+    assert body["unsupported_sentences"] == []
+
+
+def test_qa_refuses_without_evidence_and_without_provider(client) -> None:
+    headers = register(client)
+    refusal = client.post("/api/v1/qa", headers=headers, json={"query": "quantum chromodynamics"})
+    assert refusal.json()["refused"] is True
+    assert refusal.json()["refusal_reason"] == "no_evidence"
+    app.state.generator = OpenAICompatibleGenerator("", model="gpt-4o-mini")
+    unconfigured = client.post("/api/v1/qa", headers=headers, json={"query": "murder"})
+    assert unconfigured.status_code == 503
+    assert "GENERATOR_API_KEY" in unconfigured.json()["detail"]
+    # Retrieval keeps working when generation is not configured.
+    assert (
+        client.post("/api/v1/search", headers=headers, json={"query": "murder"}).status_code == 200
+    )
+
+
+@pytest.mark.parametrize(("status", "kind"), [(504, "timeout"), (503, "auth"), (502, "malformed")])
+def test_qa_maps_provider_failures_to_explicit_errors(client, status, kind) -> None:
+    headers = register(client)
+    generator = StubGenerator()
+    generator.error = GenerationError(f"provider failed ({kind})", status, kind)
+    app.state.generator = generator
+    response = client.post("/api/v1/qa", headers=headers, json={"query": "murder"})
+    assert response.status_code == status
+    assert response.json()["detail"] == f"provider failed ({kind})"
+
+
+def test_qa_stream_uses_post_body_and_emits_audited_completion(client) -> None:
+    headers = register(client)
+    response = client.post(
+        "/api/v1/qa/stream", headers=headers, json={"query": "murder Section 302"}
+    )
     assert response.status_code == 200
     assert "event: token" in response.text
     assert "event: complete" in response.text
     assert '"citations": [1]' in response.text
+    generator = StubGenerator()
+    generator.error = GenerationError("provider timed out", 504, "timeout")
+    app.state.generator = generator
+    failed = client.post("/api/v1/qa/stream", headers=headers, json={"query": "murder"})
+    assert "event: error" in failed.text and "provider timed out" in failed.text
+
+
+def test_qa_is_rate_limited_per_user(client, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "qa_rate_limit_per_minute", 2)
+    headers = register(client)
+    statuses = [
+        client.post("/api/v1/qa", headers=headers, json={"query": "murder"}).status_code
+        for _ in range(3)
+    ]
+    assert statuses == [200, 200, 429]
+
+
+def test_corpus_documents_listing_and_viewer(client) -> None:
+    headers = register(client)
+    listing = client.get("/api/v1/documents", headers=headers, params={"document_type": "judgment"})
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 2
+    assert listing.json()["facets"]["document_types"] == ["judgment", "statute"]
+    filtered = client.get("/api/v1/documents", headers=headers, params={"q": "quashing"}).json()
+    assert [document["doc_id"] for document in filtered["documents"]] == ["C2"]
+    document = client.get("/api/v1/documents/C1", headers=headers).json()
+    assert document["document"]["metadata"]["case_number"] == "Cr.A. No. 716 of 1979"
+    assert document["chunks"][0]["chunk_id"] == "C1:0"
+    assert client.get("/api/v1/documents/missing", headers=headers).status_code == 404
     assert (
-        '"disclaimer": "For informational purposes only; this is not legal advice."'
-        in response.text
+        client.get("/api/v1/documents", headers=headers, params={"limit": 500}).status_code == 422
     )
 
 
-def test_qa_does_not_fabricate_answer_when_provider_key_is_missing() -> None:
-    from backend.app.services.generation.llm import OpenAICompatibleGenerator
-
-    with TestClient(app) as client:
-        _wait_until_ready(client)
-        text = "Section 482 CrPC permits the High Court to exercise inherent powers."
-        app.state.retrievers = RetrieverRegistry(
-            [LegalChunk("case-1", "case-1:0", text, 0, len(text), len(text.split()))]
-        )
-        app.state.generator = OpenAICompatibleGenerator(
-            "", model="gpt-4o-mini", base_url="https://api.openai.com/v1"
-        )
-        response = client.post(
-            "/api/v1/qa",
-            json={"query": "Section 482 CrPC", "retriever": "bm25", "k": 5},
-        )
-
-    assert response.status_code == 503
-    assert response.json()["detail"] == (
-        "AI answer generation is not configured. Set GENERATOR_API_KEY in the API service."
+def test_feedback_is_recorded(client) -> None:
+    headers = register(client)
+    response = client.post(
+        "/api/v1/feedback",
+        headers=headers,
+        json={"query": "murder", "rating": "up", "correctness": 5},
     )
+    assert response.status_code == 201
+    assert client.app.state.database.count_feedback() == {"up": 1}
+    assert (
+        client.post(
+            "/api/v1/feedback", headers=headers, json={"query": "murder", "rating": "meh"}
+        ).status_code
+        == 422
+    )
+
+
+def test_dashboard_reflects_real_activity(client) -> None:
+    headers = register(client)
+    client.post("/api/v1/search", headers=headers, json={"query": "murder"})
+    body = client.get("/api/v1/dashboard", headers=headers).json()
+    assert body["user"]["username"] == "researcher"
+    assert body["corpus"]["documents"] == 3
+    assert body["activity_last_30_days"]["search"] == 1
+    assert body["library"]["total"] == 0
 
 
 def test_liveness_is_available_while_runtime_initializes(monkeypatch) -> None:
-    import threading
-
     from backend.app import main
 
     started = threading.Event()
     release = threading.Event()
+    original = main._initialize_runtime
 
     def slow_initialize(application) -> None:
         started.set()
         if not release.wait(timeout=5):
             raise TimeoutError("Test initialization was not released")
-        application.state.retrievers = RetrieverRegistry([])
-        application.state.initialization_status = "ready"
+        original(application)
 
     monkeypatch.setattr(main, "_initialize_runtime", slow_initialize)
     try:
-        with TestClient(app) as client:
+        with TestClient(app) as test_client:
             assert started.wait(timeout=2)
-            assert client.get("/health").json() == {"status": "ok"}
-            assert client.get("/ready").status_code == 503
-            cors_preflight = client.options(
+            assert test_client.get("/health").json() == {"status": "ok"}
+            assert test_client.get("/ready").status_code == 503
+            preflight = test_client.options(
                 "/api/v1/search",
                 headers={
                     "Origin": "http://localhost:5173",
                     "Access-Control-Request-Method": "POST",
                 },
             )
-            assert cors_preflight.status_code == 200
-            assert cors_preflight.headers["access-control-allow-origin"] == (
-                "http://localhost:5173"
-            )
-            response = client.post(
-                "/api/v1/search",
-                json={"query": "Section 482", "retriever": "bm25", "k": 5},
-            )
-            assert response.status_code == 503
-            assert response.json()["status"] == "initializing"
+            assert preflight.status_code == 200
+            assert preflight.headers["access-control-allow-origin"] == "http://localhost:5173"
+            busy = test_client.post("/api/v1/search", json={"query": "Section 482"})
+            assert busy.status_code == 503
+            assert busy.json()["status"] == "initializing"
             release.set()
-            _wait_until_ready(client)
+            wait_until_ready(test_client)
     finally:
         release.set()
 
 
-def test_runtime_initialization_failure_is_reported_without_exposing_details(monkeypatch) -> None:
+def test_initialization_failure_is_reported_without_exposing_details(monkeypatch) -> None:
     from backend.app import main
 
     def fail_initialize(application) -> None:
         raise RuntimeError("database password must not be exposed")
 
     monkeypatch.setattr(main, "_initialize_runtime", fail_initialize)
-    with TestClient(app) as client:
+    import time
+
+    with TestClient(app) as test_client:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            response = client.get("/ready")
-            if response.status_code == 503 and response.json()["status"] == "failed":
+            response = test_client.get("/ready")
+            if response.json()["status"] == "failed":
                 break
-            time.sleep(0.01)
+            time.sleep(0.02)
         assert response.status_code == 503
-        assert response.json()["status"] == "failed"
         assert "password" not in response.json()["detail"]
-        search = client.post(
-            "/api/v1/search",
-            json={"query": "Section 482", "retriever": "bm25", "k": 5},
-        )
-        assert search.status_code == 503
-        assert search.json()["status"] == "failed"
+        assert test_client.post("/api/v1/search", json={"query": "x"}).json()["status"] == "failed"
 
 
-def test_production_initialization_rejects_missing_corpus(monkeypatch, tmp_path: Path) -> None:
+def test_production_startup_rejects_unsafe_configuration(monkeypatch) -> None:
     from backend.app import main
 
-    monkeypatch.setattr(main.settings, "app_env", "production")
-    monkeypatch.setattr(main.settings, "data_chunks_path", str(tmp_path / "chunks.jsonl"))
-    monkeypatch.setattr(main.settings, "data_documents_path", str(tmp_path / "documents.jsonl"))
+    from backend.app.core.config import DEFAULT_JWT_SECRET
 
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "jwt_secret_key", DEFAULT_JWT_SECRET)
+    with pytest.raises(RuntimeError, match="JWT_SECRET_KEY"):
+        main._initialize_runtime(app)
+    monkeypatch.setattr(settings, "jwt_secret_key", "x" * 40)
+    monkeypatch.setattr(settings, "database_url", "postgresql://user:pw@db/nyaya")
     with pytest.raises(RuntimeError, match="non-empty processed chunk index"):
         main._initialize_runtime(app)
