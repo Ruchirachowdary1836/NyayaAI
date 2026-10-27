@@ -173,8 +173,10 @@ class OpenAICompatibleGenerator:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0,
-            "seed": seed,
         }
+        # Gemini's OpenAI-compatible endpoint rejects ``seed`` with HTTP 400.
+        if "generativelanguage.googleapis.com" not in self.base_url:
+            payload["seed"] = seed
         if stream:
             payload["stream"] = True
         return payload
