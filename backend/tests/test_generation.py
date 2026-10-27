@@ -101,6 +101,14 @@ async def test_provider_timeouts_and_malformed_responses(monkeypatch) -> None:
     assert caught.value.kind == "empty"
 
 
+def test_seed_is_omitted_only_for_gemini() -> None:
+    gemini = OpenAICompatibleGenerator(
+        "key", "m", "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+    assert "seed" not in gemini._payload("prompt", 42, False)
+    assert OpenAICompatibleGenerator("key", "m")._payload("prompt", 42, False)["seed"] == 42
+
+
 async def test_openai_stream_parses_tokens(monkeypatch) -> None:
     body = (
         'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
