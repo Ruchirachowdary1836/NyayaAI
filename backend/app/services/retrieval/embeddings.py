@@ -111,6 +111,11 @@ class EmbeddingAPIClient:
                 if retry_after.isdigit() and attempt < self.max_retries:
                     self._sleep(min(float(retry_after), 120.0))
                     continue
+                if response.status_code == 429 and attempt < self.max_retries:
+                    # Per-minute quotas (e.g. Gemini's free tier) send no Retry-After header;
+                    # short backoffs stay inside the same window, so wait for it to reset.
+                    self._sleep(60.0)
+                    continue
             if attempt < self.max_retries:
                 self._sleep(min(2.0**attempt, 60.0))
         assert last_error is not None

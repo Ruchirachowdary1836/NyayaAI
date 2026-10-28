@@ -95,6 +95,16 @@ def test_client_retries_rate_limits_and_fails_fast_on_bad_credentials() -> None:
     assert client.embed(["x"]).shape == (1, 2)
     assert sleeps == [7.0, 2.0]
 
+    sleeps.clear()
+    responses = iter(
+        [
+            httpx.Response(429),
+            httpx.Response(200, json={"data": [{"index": 0, "embedding": [1.0, 0.0]}]}),
+        ]
+    )
+    assert client.embed(["x"]).shape == (1, 2)
+    assert sleeps == [60.0]  # no Retry-After: wait out a per-minute quota window
+
     attempts = []
 
     def unauthorized(request):
